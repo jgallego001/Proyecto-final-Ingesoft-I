@@ -4,6 +4,8 @@ Aplicación de escritorio para que Gestión Humana registre y haga seguimiento d
 
 ## Abrir la aplicación
 
+Descarga el paquete de tu sistema desde [GitHub Releases](https://github.com/jgallego001/Proyecto-final-Ingesoft-I/releases).
+
 - **Windows de 64 bits.** Extrae el ZIP completo, abre la carpeta «Nexo Salud» y ejecuta `Nexo Salud.exe`. El paquete es portátil y no tiene firma de código propia.
 - **Linux de 64 bits.** Extrae el archivo `.tar.gz` y ejecuta `./nexo-salud` desde la carpeta «Nexo Salud» con una sesión gráfica. Electron requiere las bibliotecas habituales de Chromium y GTK, además de un sandbox compatible. El lanzador usa espacios de nombres de usuario de Linux si el equipo no tiene configurado el helper sandbox de Chromium. En equipos con una política que los deshabilita, el administrador debe habilitar el sandbox mediante la política de la distribución.
 - Crea una contraseña de al menos 10 caracteres. La necesitarás para volver a abrir el almacén. La aplicación no tiene recuperación de contraseña.

@@ -1,0 +1,56 @@
+name: Publicar Nexo Salud
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nexo-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Instalar dependencias y ejecutar pruebas
+        run: |
+          npm ci
+          npm test
+      - name: Empaquetar y comprobar las descargas
+        run: |
+          scripts/package.sh win32
+          scripts/package.sh linux
+          unzip -tq dist/Nexo-Salud-Windows-x64.zip
+          tar -tzf dist/Nexo-Salud-Linux-x64.tar.gz > /dev/null
+          (cd dist && sha256sum Nexo-Salud-Windows-x64.zip Nexo-Salud-Linux-x64.tar.gz > SHA256SUMS.txt)
+      - name: Publicar la versión en GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_NAME" != "$version" ]; then
+            echo "La etiqueta $GITHUB_REF_NAME debe coincidir con la versión $version."
+            exit 1
+          fi
+          release_assets=(dist/Nexo-Salud-Windows-x64.zip dist/Nexo-Salud-Linux-x64.tar.gz dist/SHA256SUMS.txt)
+          if gh release view "$version" > /dev/null 2>&1; then
+            gh release upload "$version" "${release_assets[@]}"
+          else
+            gh release create "$version" "${release_assets[@]}" \
+              --verify-tag --title "Nexo Salud $version" \
+              --notes "Descarga el paquete de tu sistema. En Windows, extrae el ZIP completo y abre Nexo Salud.exe. En Linux, extrae el TAR.GZ y ejecuta ./nexo-salud."
+          fi
