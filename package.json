@@ -1,1 +1,1 @@
-{"name":"nexo-salud","productName":"Nexo Salud","version":"1.0.0","private":true,"main":"main.js","scripts":{"start":"electron .","test":"node --test"},"devDependencies":{"electron":"^42.0.0"}}
+{"name":"nexo-salud","productName":"Nexo Salud","version":"1.0.1","private":true,"main":"main.js","scripts":{"start":"electron .","test":"node --test"},"devDependencies":{"electron":"^42.0.0"}}

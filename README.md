@@ -13,7 +13,7 @@ Descarga el paquete de tu sistema desde [GitHub Releases](https://github.com/jga
 ## Primer expediente
 
 1. En Vista general, pulsa **Nuevo expediente** y registra la recepción.
-2. En **Soportes**, adjunta los documentos de la lista. En **Registrar gestión**, deja constancia de la recepción física y de la revisión.
+2. En **Soportes**, adjunta los documentos de la lista. En **Registrar gestión**, elige el tipo **Recepción y documentos** para registrar la recepción física y la revisión.
 3. Registra la radicación con su evidencia y lleva el historial de cobro, pago, conciliación y archivo.
 4. En **Reportes**, selecciona un mes, exporta a CSV y registra el envío. En **Configuración**, agrega los festivos que deban excluirse de los días hábiles.
 

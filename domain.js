@@ -2,44 +2,80 @@
   const types = ['Enfermedad general', 'Enfermedad laboral', 'Accidente laboral', 'Accidente de tránsito', 'Licencia de maternidad', 'Licencia de paternidad', 'Otra licencia'];
   const entities = ['Salud Total', 'Nueva EPS', 'SOS', 'Sanitas', 'SURA EPS', 'Asmet Salud', 'ARL SURA', 'Famisanar'];
   const docs = ['Certificado original', 'Epicrisis / soporte médico', 'FURIPS', 'Certificado de nacido vivo', 'Registro civil', 'Documento de identidad', 'Documento de identidad de la madre', 'Liquidación', 'Evidencia de gestión'];
-  const actions = {
-    aviso: ['Aviso inmediato al jefe y a Administración de Personal', 'Colaborador'],
-    reemplazo: ['Asignación de reemplazo', 'Líder'],
-    entrega: ['Remisión de soportes', 'Colaborador'],
-    fisico: ['Recepción física y ubicación del archivo', 'Administración de Personal'],
-    faltantes: ['Primera notificación de faltantes', 'Administración de Personal'],
-    llamado: ['Segundo llamado por faltantes', 'Administración de Personal'],
-    citacion: ['Citación con Coordinación', 'Coordinación'],
-    directo: ['Traslado del trámite al colaborador', 'Administración de Personal'],
-    verificacion: ['Verificación documental', 'Administración de Personal'],
-    radicado: ['Transcripción / radicación', 'Administración de Personal'],
-    nomina: ['Entrega o devolución de soportes de nómina', 'Nómina'],
-    revision: ['Revisión diaria de entidad', 'Administración de Personal'],
-    rechazo: ['Rechazo y causal', 'EPS / ARL'],
-    subsanacion: ['Subsanación del rechazo', 'Administración de Personal'],
-    aceptacion: ['Aceptación y fecha prometida de pago', 'EPS / ARL'],
-    cobro: ['Solicitud semanal de pago', 'Administración de Personal'],
-    seguimiento: ['Seguimiento semanal de cobro', 'Administración de Personal'],
-    acuerdo: ['Comunicación y acuerdo de pago', 'Coordinación'],
-    identificacion: ['Identificación del detalle de pago', 'Administración de Personal'],
-    saldo: ['Saldo sin identificar / aviso a Contabilidad y entidad', 'Administración de Personal'],
-    pago: ['Pago de EPS / ARL', 'Tesorería'],
-    conciliacion: ['Conciliación contable', 'Contabilidad'],
-    persuasivo: ['Requerimiento persuasivo', 'Administración de Personal'],
-    cartera: ['Traslado a Cartera', 'Cartera'],
-    agotamiento: ['Agotamiento de la gestión de Cartera', 'Cartera'],
-    juridica: ['Traslado a Jurídica', 'Jurídica'],
-    peticion: ['Derecho de petición', 'Jurídica'],
-    tutela: ['Acción de tutela por falta de respuesta', 'Jurídica'],
-    decision: ['Decisión jurídica de recuperación o baja', 'Jurídica'],
-    solicitud: ['Solicitud de concepto de rehabilitación a EPS', 'Administración de Personal'],
-    envio: ['Envío del concepto a AFP', 'Administración de Personal'],
-    aviso_concepto: ['Aviso de concepto pendiente a EPS, ARL, AFP y trabajador', 'Administración de Personal'],
-    concepto: ['Comunicación de concepto favorable o desfavorable', 'Administración de Personal'],
-    suspension: ['Notificación de suspensión por nómina y gestión ante AFP', 'Nómina'],
-    reintegro: ['Reintegro posterior al día 180', 'Tesorería'],
-    archivo: ['Entrega a Gestión Documental y destrucción de soportes clínicos', 'Gestión Documental']
+  const actionGroups = {
+    recepcion: {
+      label: 'Recepción y documentos',
+      actions: {
+        aviso: ['Aviso inmediato al jefe y a Administración de Personal', 'Colaborador'],
+        reemplazo: ['Asignación de reemplazo', 'Líder'],
+        entrega: ['Remisión de soportes', 'Colaborador'],
+        fisico: ['Recepción física y ubicación del archivo', 'Administración de Personal'],
+        faltantes: ['Primera notificación de faltantes', 'Administración de Personal'],
+        llamado: ['Segundo llamado por faltantes', 'Administración de Personal'],
+        citacion: ['Citación con Coordinación', 'Coordinación'],
+        verificacion: ['Verificación documental', 'Administración de Personal']
+      }
+    },
+    radicacion: {
+      label: 'Radicación, rechazos y nómina',
+      actions: {
+        radicado: ['Transcripción / radicación', 'Administración de Personal'],
+        directo: ['Traslado del trámite al colaborador', 'Administración de Personal'],
+        rechazo: ['Rechazo y causal', 'EPS / ARL'],
+        subsanacion: ['Subsanación del rechazo', 'Administración de Personal'],
+        nomina: ['Entrega o devolución de soportes de nómina', 'Nómina']
+      }
+    },
+    cobro: {
+      label: 'Cobro y seguimiento',
+      actions: {
+        revision: ['Revisión diaria de entidad', 'Administración de Personal'],
+        aceptacion: ['Aceptación y fecha prometida de pago', 'EPS / ARL'],
+        cobro: ['Solicitud semanal de pago', 'Administración de Personal'],
+        seguimiento: ['Seguimiento semanal de cobro', 'Administración de Personal'],
+        acuerdo: ['Comunicación y acuerdo de pago', 'Coordinación']
+      }
+    },
+    pagos: {
+      label: 'Pagos y conciliación',
+      actions: {
+        identificacion: ['Identificación del detalle de pago', 'Administración de Personal'],
+        saldo: ['Saldo sin identificar / aviso a Contabilidad y entidad', 'Administración de Personal'],
+        pago: ['Pago de EPS / ARL', 'Tesorería'],
+        conciliacion: ['Conciliación contable', 'Contabilidad']
+      }
+    },
+    cartera: {
+      label: 'Cartera y gestión jurídica',
+      actions: {
+        persuasivo: ['Requerimiento persuasivo', 'Administración de Personal'],
+        cartera: ['Traslado a Cartera', 'Cartera'],
+        agotamiento: ['Agotamiento de la gestión de Cartera', 'Cartera'],
+        juridica: ['Traslado a Jurídica', 'Jurídica'],
+        peticion: ['Derecho de petición', 'Jurídica'],
+        tutela: ['Acción de tutela por falta de respuesta', 'Jurídica'],
+        decision: ['Decisión jurídica de recuperación o baja', 'Jurídica']
+      }
+    },
+    rehabilitacion: {
+      label: 'Rehabilitación e incapacidades prolongadas',
+      actions: {
+        solicitud: ['Solicitud de concepto de rehabilitación a EPS', 'Administración de Personal'],
+        envio: ['Envío del concepto a AFP', 'Administración de Personal'],
+        aviso_concepto: ['Aviso de concepto pendiente a EPS, ARL, AFP y trabajador', 'Administración de Personal'],
+        concepto: ['Comunicación de concepto favorable o desfavorable', 'Administración de Personal'],
+        suspension: ['Notificación de suspensión por nómina y gestión ante AFP', 'Nómina'],
+        reintegro: ['Reintegro posterior al día 180', 'Tesorería']
+      }
+    },
+    archivo: {
+      label: 'Archivo documental',
+      actions: {
+        archivo: ['Entrega a Gestión Documental y destrucción de soportes clínicos', 'Gestión Documental']
+      }
+    }
   };
+  const actions = Object.assign({}, ...Object.values(actionGroups).map((group) => group.actions));
   const date = (s) => new Date(s + 'T00:00:00Z');
   const iso = (d) => d.toISOString().slice(0, 10);
   const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -171,6 +207,6 @@
     if (e.type === 'archivo' && (!previous('conciliacion') || status(c) !== 'Conciliada' || !e.exception)) return 'Concilia el pago total y confirma la destrucción del soporte clínico físico.';
     return '';
   }
-  const api = { types, entities, docs, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, totals, status, estimate, alerts, validateEvent };
+  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, totals, status, estimate, alerts, validateEvent };
   if (typeof module !== 'undefined') module.exports = api; else root.Nexo = api;
 })(globalThis);

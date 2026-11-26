@@ -209,8 +209,10 @@ function newCase() {
   dialog.querySelector('[name="received"]').value = D.today();
 }
 function eventDialog() {
-  modal('Registrar gestión', 'La fecha, el responsable y la descripción quedan en el historial.', 'event-form',
-    field('Gestión', select('type', Object.entries(D.actions).map(([id, [label]]) => [id, label]), 'Seleccionar gestión', 'required'), true) +
+  const groups = Object.entries(D.actionGroups).map(([id, { label }]) => [id, label]);
+  modal('Registrar gestión', 'Elige un tipo de gestión para ver las opciones disponibles.', 'event-form',
+    field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
+    field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled'), true) +
     field('Fecha', dateInput('date')) + field('Responsable', input('actor', 'maxlength="120"')) +
     '<div id="event-extra" class="wide form-grid"></div>' + field('Descripción o referencia', textArea('note'), true));
   dialog.querySelector('[name="date"]').value = D.today();
@@ -299,7 +301,18 @@ document.addEventListener('change', (e) => {
   if (e.target.name === 'sortBy') { sortBy = e.target.value; document.querySelector('#case-table').innerHTML = table(matching()); }
   if (e.target.name === 'stateFilter') { stateFilter = e.target.value; document.querySelector('#case-table').innerHTML = table(matching()); }
   if (e.target.name === 'period' && e.target.value) { period = e.target.value; render(); }
-  if (e.target.name === 'type' && e.target.form?.id === 'event-form') eventExtra(e.target.value);
+  if (e.target.form?.id === 'event-form') {
+    if (e.target.name === 'group') {
+      const group = D.actionGroups[e.target.value];
+      const type = e.target.form.elements.type;
+      const options = Object.entries(group?.actions || {}).map(([id, [label]]) => opt(id, label));
+      const placeholder = group ? 'Seleccionar gestión' : 'Primero selecciona un tipo de gestión';
+      type.innerHTML = opt('', placeholder) + options.join('');
+      type.disabled = !group;
+      eventExtra('');
+    }
+    if (e.target.name === 'type') eventExtra(e.target.value);
+  }
   if (e.target.name === 'type' && e.target.form?.id === 'new-case') {
     const show = [D.types[4], D.types[5]].includes(e.target.value);
     const fields = e.target.form.querySelector('.birth-fields');
@@ -322,7 +335,11 @@ document.addEventListener('submit', (e) => {
       const result = await desktop.run('create', values);
       data = result.data; currentId = result.id; page = 'detalle'; detailTab = 'resumen';
     }
-    if (form.id === 'event-form') { data = await desktop.run('event', currentId, values); detailTab = 'historial'; }
+    if (form.id === 'event-form') {
+      const { group, ...event } = values;
+      data = await desktop.run('event', currentId, event);
+      detailTab = 'historial';
+    }
     if (form.id === 'attachment') { data = await desktop.run('attach', currentId, values.kind); detailTab = 'soportes'; }
     if (form.id === 'holiday') {
       if (data.holidays.includes(values.date)) throw Error('El festivo ya está registrado.');
