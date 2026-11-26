@@ -51,8 +51,8 @@ test('verifica, radica, subsana, cobra, concilia y archiva', () => {
   append(c, event('subsanacion'));
   append(c, event('radicado', { fileId: '8' }));
   append(c, event('aceptacion', { amount: 0.3, due: '2025-03-10' }));
-  append(c, event('cobro', { fileId: '8' }));
-  append(c, event('seguimiento', { fileId: '8' }));
+  append(c, event('cobro', { fileIds: [] }));
+  append(c, event('seguimiento', { fileIds: ['0', '8'] }));
   append(c, event('pago', { amount: 0.1, paidDays: 1 }));
   assert.equal(D.status(c), 'Pago parcial');
   append(c, event('pago', { amount: 0.2, paidDays: 2 }));
@@ -65,18 +65,27 @@ test('verifica, radica, subsana, cobra, concilia y archiva', () => {
   assert.equal(D.status(c), 'Archivada');
 });
 
-test('requiere dos solicitudes y evidencia para traslado temprano y tutela', () => {
-  const c = caseData({ files: [{ id: 'proof', kind: D.docs[8] }] });
-  append(c, event('persuasivo', { date: '2025-02-01', fileId: 'proof' }));
+test('requiere dos solicitudes, justificación para el traslado temprano y confirmación para la tutela', () => {
+  const c = caseData();
+  append(c, event('persuasivo', { date: '2025-02-01', fileIds: [] }));
   assert.match(D.validateEvent(c, event('cartera')), /dos requerimientos/);
-  append(c, event('persuasivo', { fileId: 'proof' }));
+  append(c, event('persuasivo', { fileIds: [] }));
   assert.match(D.validateEvent(c, event('cartera')), /180 días/);
-  append(c, event('cartera', { exception: true, fileId: 'proof' }));
+  append(c, event('cartera', { exception: true, fileIds: [] }));
   append(c, event('agotamiento'));
   append(c, event('juridica'));
-  append(c, event('peticion', { fileId: 'proof' }));
-  assert.match(D.validateEvent(c, event('tutela', { fileId: 'proof' })), /sin respuesta/);
-  append(c, event('tutela', { fileId: 'proof', exception: true }));
+  append(c, event('peticion', { fileIds: [] }));
+  assert.match(D.validateEvent(c, event('tutela', { fileIds: [] })), /sin respuesta/);
+  append(c, event('tutela', { fileIds: [], exception: true }));
+});
+
+test('permite cero o varios soportes del expediente y admite enlaces antiguos', () => {
+  const c = caseData({ files: [{ id: 'one' }, { id: 'two' }] });
+  assert.deepEqual(D.linkedFileIds(event('aviso', { fileId: 'one' })), ['one']);
+  assert.deepEqual(D.linkedFileIds(event('aviso', { fileIds: [] })), []);
+  assert.equal(D.validateEvent(c, event('aviso', { fileIds: ['one', 'two'] })), '');
+  assert.match(D.validateEvent(c, event('aviso', { fileIds: ['one', 'other-case'] })), /este expediente/);
+  assert.match(D.validateEvent(c, event('aviso', { fileIds: 'one' })), /no es válida/);
 });
 
 test('estima tramos y genera alertas de rehabilitación', () => {

@@ -137,8 +137,25 @@ function detalle() {
   ])}</section><section class="panel padded"><h2>Valores del expediente</h2>${pairs([['Aprobado', money(totals.approved)], ['Pagado', money(totals.paid)], ['Saldo', money(totals.due)], ...(est ? [['Estimado empleador', money(est.employer)], ['Estimado EPS', money(est.eps)], ['Días desde el 181 para gestionar', est.referred]] : [])])}</section></div>`;
   if (detailTab === 'soportes') section = `<div class="dashboard-grid"><section class="panel padded"><div class="section-title"><h2>Soportes adjuntos</h2>${locked ? '' : btn('Adjuntar', 'attach', 'plus', 'primary')}</div>${c.files.length ? `<div class="item-list">${c.files.map((f) => `<div><span class="metric-icon lilac">${icon('file', 18)}</span><span><strong>${esc(f.kind)}</strong><small>${esc(f.name)}</small></span>${btn('Guardar copia', 'file:' + f.id, 'download')}</div>`).join('')}</div>` : empty('Sin soportes adjuntos', 'Los archivos agregados aparecerán aquí.', 'file')}</section>
   <section class="panel padded"><h2>Documentos requeridos</h2>${locked ? '<p class="muted">Los soportes clínicos se eliminaron al archivar.</p>' : `<ul class="checklist">${D.required(c).map((d) => `<li>${icon(c.files.some((f) => f.kind === d) ? 'check' : 'clock', 18)} ${esc(d)}</li>`).join('')}</ul>`}</section></div>`;
-  if (detailTab === 'historial') section = `<section class="panel padded"><h2>Historial de gestiones</h2>${c.events.length ? `<div class="item-list timeline">${[...c.events].reverse().map((e) => `<div><span class="metric-icon lilac">${icon('clock', 17)}</span><span><strong>${esc(D.actions[e.type][0])}</strong><small>${fmt(e.date)} · ${esc(e.actor || D.actions[e.type][1])}${e.amount ? ' · ' + money(e.amount) : ''}${e.paidDays ? ' · ' + esc(e.paidDays) + ' días pagados' : ''}${e.due ? ' · Promesa ' + fmt(e.due) : ''}</small><p>${esc(e.note)}</p></span>${e.fileId ? btn('Evidencia', 'file:' + e.fileId, 'download') : ''}</div>`).join('')}</div>` : empty('Sin gestiones registradas', 'Agrega una gestión para iniciar la trazabilidad.', 'clock')}</section>`;
+  if (detailTab === 'historial') section = history(c);
   return `${title}<div class="detail-bar">${pill(D.status(c))}<div class="tabs">${[['resumen','Resumen'],['soportes','Soportes'],['historial','Historial']].map(([key, label]) => btn(label, 'tab:' + key, '', detailTab === key ? 'tab-active' : 'quiet')).join('')}</div></div>${section}`;
+}
+function history(c) {
+  const files = new Map(c.files.map((file) => [file.id, file]));
+  const events = [...c.events].reverse().map((event) => {
+    const supports = D.linkedFileIds(event).map((id) => files.get(id)).filter(Boolean);
+    const downloadButtons = supports.map((file) => btn(esc(file.kind + ' · ' + file.name), 'file:' + esc(file.id), 'download'));
+    const [label, actor] = D.actions[event.type];
+    return `<div>
+      <span class="metric-icon lilac">${icon('clock', 17)}</span>
+      <span><strong>${esc(label)}</strong>
+        <small>${fmt(event.date)} · ${esc(event.actor || actor)}${event.amount ? ' · ' + money(event.amount) : ''}${event.paidDays ? ' · ' + esc(event.paidDays) + ' días pagados' : ''}${event.due ? ' · Promesa ' + fmt(event.due) : ''}</small>
+        <p>${esc(event.note)}</p>
+        ${downloadButtons.length ? `<span class="history-supports">${downloadButtons.join('')}</span>` : ''}
+      </span>
+    </div>`;
+  });
+  return `<section class="panel padded"><h2>Historial de gestiones</h2>${events.length ? `<div class="item-list timeline">${events.join('')}</div>` : empty('Sin gestiones registradas', 'Agrega una gestión para iniciar la trazabilidad.', 'clock')}</section>`;
 }
 function reportRows() {
   const start = period + '-01';
@@ -222,11 +239,17 @@ function eventExtra(type) {
   const c = data.cases.find((item) => item.id === currentId);
   const extras = dialog.querySelector('#event-extra');
   dialog.querySelector('[name="actor"]').value = D.actions[type]?.[1] || '';
-  const proof = field('Soporte vinculado', select('fileId', c.files.map((f) => [f.id, f.kind + ' · ' + f.name]), 'Seleccionar soporte'), true);
+  const files = type === 'archivo' ? c.files.filter((file) => file.kind !== D.docs[1]) : c.files;
+  const proof = `<fieldset class="wide support-picker">
+    <legend>Soportes vinculados <span>(opcional)</span></legend>
+    ${files.length ? `<div class="support-options">${files.map((file) =>
+      `<label class="check-field"><input type="checkbox" name="fileIds" value="${esc(file.id)}"><span>${esc(file.kind)} · ${esc(file.name)}</span></label>`).join('')}</div>` :
+      '<p class="muted">No hay soportes disponibles para vincular.</p>'}
+  </fieldset>`;
   const checks = {
     archivo: 'Confirmo la destrucción física de epicrisis e historia clínica. La copia clínica cifrada se eliminará del almacén.',
-    cartera: 'Confirmo deterioro crediticio acreditado para traslado antes de 180 días.',
-    juridica: 'Confirmo que la causal de rechazo es improcedente y vinculo su evidencia.',
+    cartera: 'Confirmo el deterioro crediticio y lo documento en la descripción para el traslado antes de 180 días.',
+    juridica: 'Confirmo que la causal de rechazo es improcedente y la documento en la descripción.',
     tutela: 'Confirmo que la entidad no respondió al derecho de petición.'
   };
   const guides = {
@@ -242,7 +265,7 @@ function eventExtra(type) {
     (['aceptacion', 'pago', 'reintegro'].includes(type) ? field('Valor (COP)', input('amount', 'type="number" min="0.01" step="0.01" required')) : '') +
     (type === 'pago' ? field('Días pagados', input('paidDays', 'type="number" min="1" step="1" required')) : '') +
     (['aceptacion', 'acuerdo'].includes(type) ? field('Fecha prometida', dateInput('due')) : '') +
-    (type && type !== 'archivo' ? proof : '') +
+    (type ? proof : '') +
     (checks[type] ? `<label class="wide check-field"><input type="checkbox" name="exception"> ${checks[type]}</label>` : '');
 }
 async function work(fn, form) {
@@ -324,7 +347,8 @@ document.addEventListener('change', (e) => {
 document.addEventListener('submit', (e) => {
   e.preventDefault();
   const form = e.target;
-  const values = Object.fromEntries(new FormData(form));
+  const fields = new FormData(form);
+  const values = Object.fromEntries(fields);
   work(async () => {
     if (form.id === 'unlock') {
       if (!configured && values.password !== values.confirmation) throw Error('Las contraseñas deben coincidir.');
@@ -337,7 +361,7 @@ document.addEventListener('submit', (e) => {
     }
     if (form.id === 'event-form') {
       const { group, ...event } = values;
-      data = await desktop.run('event', currentId, event);
+      data = await desktop.run('event', currentId, { ...event, fileIds: fields.getAll('fileIds') });
       detailTab = 'historial';
     }
     if (form.id === 'attachment') { data = await desktop.run('attach', currentId, values.kind); detailTab = 'soportes'; }

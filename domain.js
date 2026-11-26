@@ -171,12 +171,17 @@
     if (accumulated > 180 && !last(c, 'suspension')) push('Comunicar suspensión y trámite ante AFP', now, 'Rehabilitación');
     return out;
   }
+  function linkedFileIds(event) {
+    if (Array.isArray(event.fileIds)) return event.fileIds;
+    return event.fileId ? [event.fileId] : [];
+  }
   function validateEvent(c, e, holidays = []) {
     const previous = (type) => c.events.some((item) => item.type === type && item.date <= e.date);
-    const evidence = c.files.some((f) => f.id === e.fileId);
     if (last(c, 'archivo')) return 'El expediente ya está archivado.';
     if (!actions[e.type] || !e.date || !e.note.trim()) return 'Completa la gestión, fecha y descripción.';
-    if (['radicado', 'cobro', 'seguimiento', 'persuasivo', 'peticion', 'tutela'].includes(e.type) && !evidence) return 'Vincula un soporte como evidencia.';
+    if (e.fileIds !== undefined && !Array.isArray(e.fileIds)) return 'La selección de soportes no es válida.';
+    const available = new Set(c.files.map((file) => file.id));
+    if (linkedFileIds(e).some((id) => !available.has(id))) return 'Selecciona soportes de este expediente.';
     if (e.type === 'faltantes' && !missing(c).length) return 'La lista de soportes está completa.';
     if (e.type === 'llamado' && (!previous('faltantes') || !missing(c).length || e.date < businessDays(last(c, 'faltantes').date, 3, holidays))) return 'El segundo llamado requiere faltantes y que se cumplan los tres días hábiles.';
     if (e.type === 'citacion' && !previous('llamado')) return 'Registra primero el segundo llamado.';
@@ -192,12 +197,12 @@
     if (e.type === 'cartera') {
       const requests = c.events.filter((item) => item.type === 'persuasivo' && item.date <= e.date).sort((a, b) => a.date.localeCompare(b.date));
       if (requests.length < 2) return 'Registra al menos dos requerimientos persuasivos.';
-      if (e.date < add(requests[0].date, 180) && !(e.exception && evidence)) return 'Espera 180 días o vincula evidencia de deterioro crediticio.';
+      if (e.date < add(requests[0].date, 180) && !e.exception) return 'Espera 180 días o confirma y documenta el deterioro crediticio en la descripción.';
     }
     if (e.type === 'agotamiento' && !previous('cartera')) return 'Registra el traslado a Cartera.';
     if (e.type === 'juridica') {
       const promised = last(c, 'acuerdo')?.due || last(c, 'aceptacion')?.due;
-      const denial = status(c) === 'Rechazada' && e.exception && evidence;
+      const denial = status(c) === 'Rechazada' && e.exception;
       const brokenPromise = totals(c).due > 0 && promised && e.date > promised;
       if (!previous('agotamiento') && !denial && !brokenPromise) return 'Registra el agotamiento de Cartera, documenta el rechazo improcedente o verifica que haya vencido la promesa de pago.';
     }
@@ -207,6 +212,6 @@
     if (e.type === 'archivo' && (!previous('conciliacion') || status(c) !== 'Conciliada' || !e.exception)) return 'Concilia el pago total y confirma la destrucción del soporte clínico físico.';
     return '';
   }
-  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, totals, status, estimate, alerts, validateEvent };
+  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, totals, status, estimate, alerts, linkedFileIds, validateEvent };
   if (typeof module !== 'undefined') module.exports = api; else root.Nexo = api;
 })(globalThis);

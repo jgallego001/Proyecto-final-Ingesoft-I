@@ -119,12 +119,20 @@ const handlers = {
     if (!validDate(event.date) || (event.due && !validDate(event.due)) || !requiredText(event.note)) throw Error('Revisa la fecha y la descripción.');
     const error = rules.validateEvent(c, event, data.holidays);
     if (error) throw Error(error);
-    const clinical = c.files.filter((f) => f.kind === rules.docs[1]);
-    c.events.push({ ...event, id: crypto.randomUUID(), at: new Date().toISOString() });
+    const record = { ...event, fileIds: [...new Set(rules.linkedFileIds(event))], id: crypto.randomUUID(), at: new Date().toISOString() };
+    delete record.fileId;
+    c.events.push(record);
     if (event.type === 'archivo') {
-      next.pendingPurge = [...(next.pendingPurge || []), ...clinical.map((f) => f.id)];
-      c.files = c.files.filter((f) => f.kind !== rules.docs[1]);
-      for (const e of c.events) if (clinical.some((f) => f.id === e.fileId)) e.fileId = '';
+      const clinical = new Set(c.files.filter((file) => file.kind === rules.docs[1]).map((file) => file.id));
+      next.pendingPurge = [...(next.pendingPurge || []), ...clinical];
+      c.files = c.files.filter((file) => !clinical.has(file.id));
+      for (const entry of c.events) {
+        const ids = rules.linkedFileIds(entry);
+        const retained = ids.filter((id) => !clinical.has(id));
+        if (retained.length === ids.length) continue;
+        entry.fileIds = retained;
+        delete entry.fileId;
+      }
     }
     await persist(next);
     if (event.type === 'archivo') await purge(data);
