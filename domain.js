@@ -114,6 +114,25 @@
     return list;
   }
   const missing = (c) => required(c).filter((kind) => !c.files.some((f) => f.kind === kind));
+  function intake(c, through) {
+    let reception;
+    let verification;
+    for (const event of c.events) {
+      if (through && event.date > through) continue;
+      if (event.type === 'fisico' && (!reception || event.date < reception.date)) reception = event;
+      if (event.type === 'verificacion' && reception && event.date >= reception.date) verification = event;
+    }
+    return { reception, verification };
+  }
+  function requiredStep(c) {
+    if (last(c, 'archivo')) return '';
+    const { reception, verification } = intake(c);
+    if (!reception) return 'fisico';
+    return verification ? '' : 'verificacion';
+  }
+  function needsCorrection(c, verification = intake(c).verification) {
+    return verification?.verificationResult === 'observada' || missing(c).length > 0;
+  }
   function totals(c) {
     const cents = (amount) => Math.round(Number(amount || 0) * 100);
     const paid = c.events.filter((e) => e.type === 'pago').reduce((sum, e) => sum + cents(e.amount), 0);
@@ -124,8 +143,31 @@
     if (last(c, 'archivo')) return 'Archivada';
     if (last(c, 'conciliacion') && c.events.indexOf(last(c, 'conciliacion')) > c.events.indexOf(last(c, 'pago')) && totals(c).due === 0) return 'Conciliada';
     const latest = c.events.findLast((e) => ['pago', 'aceptacion', 'rechazo', 'radicado'].includes(e.type));
-    return { pago: totals(c).due > 0 ? 'Pago parcial' : 'Pagada', aceptacion: 'Cobrada', rechazo: 'Rechazada', radicado: 'Transcrita' }[latest?.type] ||
-      (last(c, 'verificacion') && !missing(c).length ? 'Verificada' : missing(c).length ? 'Por completar' : 'Recibida');
+    if (latest) return { pago: totals(c).due > 0 ? 'Pago parcial' : 'Pagada', aceptacion: 'Cobrada', rechazo: 'Rechazada', radicado: 'Transcrita' }[latest.type];
+    if (needsCorrection(c)) return 'Por completar';
+    return intake(c).verification ? 'Verificada' : 'Recibida';
+  }
+  function pendingTask(c) {
+    const step = requiredStep(c);
+    if (step) return actions[step][0];
+    const state = status(c);
+    switch (state) {
+      case 'Archivada': return '';
+      case 'Conciliada': return 'Archivar el expediente';
+      case 'Pagada': return last(c, 'identificacion') ? 'Conciliar el pago' : 'Identificar el detalle del pago';
+      case 'Cobrada':
+      case 'Pago parcial': return last(c, 'cobro') ? 'Dar seguimiento al pago pendiente' : 'Solicitar el pago a la entidad';
+      case 'Transcrita': return 'Registrar la respuesta de la EPS / ARL';
+      case 'Rechazada': {
+        const corrected = c.events.indexOf(last(c, 'subsanacion')) > c.events.indexOf(last(c, 'rechazo'));
+        return corrected ? 'Registrar la nueva radicación' : 'Subsanar el rechazo de la entidad';
+      }
+      case 'Por completar': {
+        const notified = c.events.indexOf(last(c, 'faltantes')) > c.events.indexOf(intake(c).verification);
+        return notified ? 'Recibir correcciones y volver a verificar' : 'Solicitar correcciones o soportes faltantes';
+      }
+      default: return 'Transcribir y radicar ante la EPS / ARL';
+    }
   }
   function estimate(c) {
     if (c.type !== types[0] || !Number(c.ibc)) return null;
@@ -142,9 +184,11 @@
     const filing = deadline(c);
     if (!last(c, 'radicado')) push(filing ? 'Plazo de radicación' : 'Confirmar plazo con entidad', filing, 'Radicación');
     if (!last(c, 'entrega')) push('Remitir soportes al líder o a Personal', add(c.issued, 2), 'Recepción');
-    if (missing(c).length) {
+    const step = requiredStep(c);
+    if (step) push(actions[step][0], '', 'Recepción y documentos');
+    if (!step && needsCorrection(c)) {
       const notice = last(c, 'faltantes');
-      if (!notice) push('Notificar soportes faltantes', c.received, 'Documentación');
+      if (!notice || c.events.indexOf(notice) < c.events.indexOf(intake(c).verification)) push('Solicitar correcciones o soportes faltantes', c.received, 'Documentación');
       else if (!last(c, 'llamado')) push('Segundo llamado por faltantes', businessDays(notice.date, 3, holidays), 'Documentación');
       else if (!last(c, 'citacion')) push('Revisar citación con Coordinación', '', 'Documentación');
     }
@@ -179,13 +223,22 @@
     const previous = (type) => c.events.some((item) => item.type === type && item.date <= e.date);
     if (last(c, 'archivo')) return 'El expediente ya está archivado.';
     if (!actions[e.type] || !e.date || !e.note.trim()) return 'Completa la gestión, fecha y descripción.';
+    const step = requiredStep(c);
+    if (step && e.type !== step) return 'La siguiente gestión obligatoria es: ' + actions[step][0] + '.';
+    const { reception, verification } = intake(c, e.date);
+    if (e.type !== 'fisico' && !reception) return 'La fecha de la gestión debe ser igual o posterior a la recepción física.';
+    if (e.type !== 'fisico' && e.type !== 'verificacion' && !verification) return 'La fecha de la gestión debe ser igual o posterior a una verificación documental.';
+    if (e.type === 'verificacion') {
+      if (!['aprobada', 'observada'].includes(e.verificationResult)) return 'Selecciona el resultado de la verificación documental.';
+      if (e.verificationResult === 'aprobada' && missing(c).length) return 'Adjunta los soportes requeridos antes de aprobar la documentación.';
+    }
+    if (e.type === 'radicado' && (needsCorrection(c, verification) || needsCorrection(c))) return 'Corrige los documentos y registra una verificación aprobada antes de radicar.';
     if (e.fileIds !== undefined && !Array.isArray(e.fileIds)) return 'La selección de soportes no es válida.';
     const available = new Set(c.files.map((file) => file.id));
     if (linkedFileIds(e).some((id) => !available.has(id))) return 'Selecciona soportes de este expediente.';
-    if (e.type === 'faltantes' && !missing(c).length) return 'La lista de soportes está completa.';
-    if (e.type === 'llamado' && (!previous('faltantes') || !missing(c).length || e.date < businessDays(last(c, 'faltantes').date, 3, holidays))) return 'El segundo llamado requiere faltantes y que se cumplan los tres días hábiles.';
+    if (e.type === 'faltantes' && !needsCorrection(c)) return 'La documentación ya está completa y aprobada.';
+    if (e.type === 'llamado' && (!previous('faltantes') || !needsCorrection(c) || e.date < businessDays(last(c, 'faltantes').date, 3, holidays))) return 'El segundo llamado requiere correcciones pendientes y que se cumplan los tres días hábiles.';
     if (e.type === 'citacion' && !previous('llamado')) return 'Registra primero el segundo llamado.';
-    if (['verificacion', 'radicado'].includes(e.type) && (missing(c).length || !previous('fisico'))) return 'Completa los soportes y registra la recepción física.';
     if (e.type === 'radicado' && status(c) === 'Rechazada' && !(last(c, 'subsanacion')?.date >= last(c, 'rechazo').date)) return 'Registra primero la subsanación del rechazo.';
     if (['aceptacion', 'revision', 'rechazo', 'nomina', 'cobro'].includes(e.type) && !previous('radicado')) return 'Registra primero la radicación.';
     if (e.type === 'seguimiento' && !previous('cobro')) return 'Registra primero la solicitud de pago.';
@@ -212,6 +265,6 @@
     if (e.type === 'archivo' && (!previous('conciliacion') || status(c) !== 'Conciliada' || !e.exception)) return 'Concilia el pago total y confirma la destrucción del soporte clínico físico.';
     return '';
   }
-  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, totals, status, estimate, alerts, linkedFileIds, validateEvent };
+  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, requiredStep, pendingTask, totals, status, estimate, alerts, linkedFileIds, validateEvent };
   if (typeof module !== 'undefined') module.exports = api; else root.Nexo = api;
 })(globalThis);

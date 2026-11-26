@@ -88,7 +88,7 @@ function metric(label, value, hint, glyph, color) {
 }
 function table(cases, brief = false) {
   if (!cases.length) return empty(brief ? 'Aún no hay expedientes' : 'Sin expedientes para mostrar', brief ? 'Registra una incapacidad o licencia para empezar su seguimiento.' : 'Cambia la búsqueda o registra un expediente.', 'folder', brief ? btn('Registrar expediente', 'new', 'plus') : '');
-  return `<div class="table-wrap"><table><thead><tr><th>Colaborador</th><th>Tipo de novedad</th><th>Entidad</th><th>Estado</th><th aria-label="Abrir"></th></tr></thead><tbody>${cases.map((c) => `<tr><td><div class="person"><span class="avatar">${esc(initials(c.name))}</span><div><strong>${esc(c.name)}</strong><small>${esc(c.folio)} · ${fmt(c.start)}</small></div></div></td><td>${esc(c.type)}</td><td>${esc(c.entity)}</td><td>${pill(D.status(c))}</td><td><button class="icon-btn" data-action="case:${c.id}" aria-label="Abrir ${esc(c.folio)}">${icon('arrow', 17)}</button></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Colaborador</th><th>Tipo de novedad</th><th>Entidad</th><th>Estado y pendiente</th><th aria-label="Abrir"></th></tr></thead><tbody>${cases.map((c) => `<tr><td><div class="person"><span class="avatar">${esc(initials(c.name))}</span><div><strong>${esc(c.name)}</strong><small>${esc(c.folio)} · ${fmt(c.start)}</small></div></div></td><td>${esc(c.type)}</td><td>${esc(c.entity)}</td><td>${pill(D.status(c))}<small class="case-pending">${esc(D.pendingTask(c) || 'Sin gestiones pendientes')}</small></td><td><button class="icon-btn" data-action="case:${c.id}" aria-label="Abrir ${esc(c.folio)}">${icon('arrow', 17)}</button></td></tr>`).join('')}</tbody></table></div>`;
 }
 function dashboard() {
   const active = data.cases.filter((c) => !['Archivada', 'Conciliada'].includes(D.status(c))).length;
@@ -138,7 +138,21 @@ function detalle() {
   if (detailTab === 'soportes') section = `<div class="dashboard-grid"><section class="panel padded"><div class="section-title"><h2>Soportes adjuntos</h2>${locked ? '' : btn('Adjuntar', 'attach', 'plus', 'primary')}</div>${c.files.length ? `<div class="item-list">${c.files.map((f) => `<div><span class="metric-icon lilac">${icon('file', 18)}</span><span><strong>${esc(f.kind)}</strong><small>${esc(f.name)}</small></span>${btn('Guardar copia', 'file:' + f.id, 'download')}</div>`).join('')}</div>` : empty('Sin soportes adjuntos', 'Los archivos agregados aparecerán aquí.', 'file')}</section>
   <section class="panel padded"><h2>Documentos requeridos</h2>${locked ? '<p class="muted">Los soportes clínicos se eliminaron al archivar.</p>' : `<ul class="checklist">${D.required(c).map((d) => `<li>${icon(c.files.some((f) => f.kind === d) ? 'check' : 'clock', 18)} ${esc(d)}</li>`).join('')}</ul>`}</section></div>`;
   if (detailTab === 'historial') section = history(c);
-  return `${title}<div class="detail-bar">${pill(D.status(c))}<div class="tabs">${[['resumen','Resumen'],['soportes','Soportes'],['historial','Historial']].map(([key, label]) => btn(label, 'tab:' + key, '', detailTab === key ? 'tab-active' : 'quiet')).join('')}</div></div>${section}`;
+  const pending = D.pendingTask(c);
+  const required = D.requiredStep(c);
+  const missing = locked ? [] : D.missing(c);
+  const guidance = {
+    fisico: 'Registra esta gestión para poder verificar la documentación.',
+    verificacion: 'Registra el resultado de la revisión para habilitar las demás gestiones.'
+  };
+  const pendingCard = `<section class="panel pending-card" aria-labelledby="pending-heading">
+    <span class="metric-icon ${required ? 'peach' : 'lilac'}">${icon(pending ? 'clock' : 'check', 18)}</span>
+    <div><h2 id="pending-heading">Siguiente gestión</h2><strong>${esc(pending || 'Sin gestiones pendientes')}</strong>
+      ${required ? `<p class="muted">${guidance[required]}</p>` : ''}
+      ${missing.length ? `<p class="muted">Soportes faltantes · ${esc(missing.join(', '))}</p>` : ''}
+    </div>
+  </section>`;
+  return `${title}${pendingCard}<div class="detail-bar">${pill(D.status(c))}<div class="tabs">${[['resumen','Resumen'],['soportes','Soportes'],['historial','Historial']].map(([key, label]) => btn(label, 'tab:' + key, '', detailTab === key ? 'tab-active' : 'quiet')).join('')}</div></div>${section}`;
 }
 function history(c) {
   const files = new Map(c.files.map((file) => [file.id, file]));
@@ -146,10 +160,14 @@ function history(c) {
     const supports = D.linkedFileIds(event).map((id) => files.get(id)).filter(Boolean);
     const downloadButtons = supports.map((file) => btn(esc(file.kind + ' · ' + file.name), 'file:' + esc(file.id), 'download'));
     const [label, actor] = D.actions[event.type];
+    const result = event.type === 'verificacion'
+      ? (event.verificationResult === 'observada' ? 'Requiere correcciones' : 'Completa y correcta')
+      : '';
     return `<div>
       <span class="metric-icon lilac">${icon('clock', 17)}</span>
       <span><strong>${esc(label)}</strong>
         <small>${fmt(event.date)} · ${esc(event.actor || actor)}${event.amount ? ' · ' + money(event.amount) : ''}${event.paidDays ? ' · ' + esc(event.paidDays) + ' días pagados' : ''}${event.due ? ' · Promesa ' + fmt(event.due) : ''}</small>
+        ${result ? `<small>Resultado · ${esc(result)}</small>` : ''}
         <p>${esc(event.note)}</p>
         ${downloadButtons.length ? `<span class="history-supports">${downloadButtons.join('')}</span>` : ''}
       </span>
@@ -226,14 +244,20 @@ function newCase() {
   dialog.querySelector('[name="received"]').value = D.today();
 }
 function eventDialog() {
+  const c = data.cases.find((item) => item.id === currentId);
+  const required = D.requiredStep(c);
   const groups = Object.entries(D.actionGroups).map(([id, { label }]) => [id, label]);
-  modal('Registrar gestión', 'Elige un tipo de gestión para ver las opciones disponibles.', 'event-form',
-    field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
-    field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled'), true) +
+  const actionFields = required
+    ? field('Gestión obligatoria', `<input value="${esc(D.actions[required][0])}" readonly>`, true) + input('type', `type="hidden" value="${required}"`)
+    : field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
+      field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled'), true);
+  const hint = required ? 'Completa esta gestión para continuar con el expediente.' : 'Elige un tipo de gestión para ver las opciones disponibles.';
+  modal('Registrar gestión', hint, 'event-form', actionFields +
     field('Fecha', dateInput('date')) + field('Responsable', input('actor', 'maxlength="120"')) +
     '<div id="event-extra" class="wide form-grid"></div>' + field('Descripción o referencia', textArea('note'), true));
   dialog.querySelector('[name="date"]').value = D.today();
   dialog.querySelector('[name="note"]').required = true;
+  if (required) eventExtra(required);
 }
 function eventExtra(type) {
   const c = data.cases.find((item) => item.id === currentId);
@@ -253,6 +277,7 @@ function eventExtra(type) {
     tutela: 'Confirmo que la entidad no respondió al derecho de petición.'
   };
   const guides = {
+    verificacion: 'Indica si la documentación está completa y correcta. Si requiere correcciones, detállalas en la descripción.',
     fisico: 'Anota la ubicación por entidad y fecha de inicio. Confirma la recepción del original y el escaneo del soporte.',
     radicado: 'Registra número de radicado, canal y formato usado. Canal habitual: ' + D.channel(c.entity) + '.',
     rechazo: 'Registra la causal informada por la entidad.',
@@ -261,7 +286,10 @@ function eventExtra(type) {
     concepto: 'Indica si el concepto fue favorable o desfavorable y a quién se comunicó.',
     saldo: 'Indica la comunicación a Contabilidad y la solicitud de ayuda al asesor de la entidad.'
   };
+  const verificationOptions = [['observada', 'Requiere correcciones o faltan soportes']];
+  if (type === 'verificacion' && !D.missing(c).length) verificationOptions.unshift(['aprobada', 'Completa y correcta']);
   extras.innerHTML = (guides[type] ? '<p class="muted wide">' + esc(guides[type]) + '</p>' : '') +
+    (type === 'verificacion' ? field('Resultado de la verificación', select('verificationResult', verificationOptions, 'Seleccionar resultado', 'required'), true) : '') +
     (['aceptacion', 'pago', 'reintegro'].includes(type) ? field('Valor (COP)', input('amount', 'type="number" min="0.01" step="0.01" required')) : '') +
     (type === 'pago' ? field('Días pagados', input('paidDays', 'type="number" min="1" step="1" required')) : '') +
     (['aceptacion', 'acuerdo'].includes(type) ? field('Fecha prometida', dateInput('due')) : '') +

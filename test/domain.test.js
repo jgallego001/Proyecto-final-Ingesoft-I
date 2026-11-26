@@ -32,8 +32,65 @@ test('aplica la lista documental por origen y duración', () => {
   assert.deepEqual(D.required(caseData({ type: D.types[5] })), [0, 1, 3, 4, 6].map((i) => D.docs[i]));
 });
 
+test('exige primero la recepción y luego la verificación, incluso con documentos incompletos', () => {
+  const c = caseData();
+  assert.equal(D.requiredStep(c), 'fisico');
+  assert.match(D.pendingTask(c), /Recepción física/);
+  assert.match(D.validateEvent(c, event('verificacion')), /obligatoria.*Recepción física/);
+  assert.match(D.validateEvent(c, event('aviso')), /obligatoria.*Recepción física/);
+
+  append(c, event('fisico', { date: '2025-02-07' }));
+  assert.equal(D.requiredStep(c), 'verificacion');
+  assert.match(D.pendingTask(c), /Verificación documental/);
+  assert.match(D.validateEvent(c, event('fisico')), /obligatoria.*Verificación documental/);
+  assert.match(D.validateEvent(c, event('faltantes')), /obligatoria.*Verificación documental/);
+  assert.match(D.validateEvent(c, event('verificacion', { date: '2025-02-06' })), /posterior a la recepción/);
+  assert.match(D.validateEvent(c, event('verificacion')), /Selecciona el resultado/);
+  assert.match(D.validateEvent(c, event('verificacion', { verificationResult: 'aprobada' })), /soportes requeridos/);
+  append(c, event('verificacion', { verificationResult: 'observada' }));
+
+  assert.equal(D.requiredStep(c), '');
+  assert.match(D.pendingTask(c), /Solicitar correcciones/);
+  assert.match(D.validateEvent(c, event('aviso', { date: '2025-02-08' })), /posterior a una verificación/);
+  append(c, event('faltantes'));
+  assert.match(D.pendingTask(c), /volver a verificar/);
+  c.files = D.required(c).map((kind) => ({ kind }));
+  assert.match(D.validateEvent(c, event('radicado')), /verificación aprobada/);
+  append(c, event('verificacion', { verificationResult: 'aprobada' }));
+  assert.match(D.pendingTask(c), /Transcribir y radicar/);
+  append(c, event('radicado'));
+  assert.match(D.pendingTask(c), /respuesta de la EPS/);
+});
+
+test('reconoce la verificación anterior y permite completar expedientes históricos', () => {
+  const c = caseData({
+    files: [D.docs[0], D.docs[1]].map((kind) => ({ kind })),
+    events: [event('aviso'), event('fisico'), event('verificacion')]
+  });
+  assert.equal(D.requiredStep(c), '');
+  assert.equal(D.status(c), 'Verificada');
+  append(c, event('radicado'));
+  const started = caseData({ files: c.files, events: [event('fisico'), event('radicado')] });
+  assert.equal(D.status(started), 'Transcrita');
+  assert.equal(D.requiredStep(started), 'verificacion');
+  assert.match(D.validateEvent(started, event('revision')), /obligatoria.*Verificación documental/);
+  append(started, event('verificacion', { verificationResult: 'aprobada' }));
+  append(started, event('revision'));
+  assert.equal(D.requiredStep(caseData({ events: [event('archivo')] })), '');
+});
+
+test('permite notificar documentos incorrectos aunque todos los archivos estén adjuntos', () => {
+  const c = caseData({ files: [D.docs[0], D.docs[1]].map((kind) => ({ kind })) });
+  append(c, event('fisico'));
+  append(c, event('verificacion', { verificationResult: 'observada' }));
+  assert.equal(D.status(c), 'Por completar');
+  append(c, event('faltantes'));
+});
+
 test('omite fin de semana y festivos para el segundo llamado', () => {
   const c = caseData();
+  append(c, event('fisico', { date: '2025-01-31' }));
+  append(c, event('verificacion', { date: '2025-01-31', verificationResult: 'observada' }));
   append(c, event('faltantes', { date: '2025-01-31' }));
   const holidays = ['2025-02-03'];
   assert.equal(D.businessDays('2025-01-31', 3, holidays), '2025-02-06');
@@ -44,8 +101,10 @@ test('omite fin de semana y festivos para el segundo llamado', () => {
 
 test('verifica, radica, subsana, cobra, concilia y archiva', () => {
   const c = caseData({ files: [0, 1, 8].map((i) => ({ id: String(i), kind: D.docs[i] })) });
-  assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /recepción física/);
-  for (const kind of ['fisico', 'verificacion', 'radicado', 'rechazo']) append(c, event(kind, { fileId: '8' }));
+  assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /obligatoria.*Recepción física/);
+  append(c, event('fisico'));
+  append(c, event('verificacion', { verificationResult: 'aprobada' }));
+  for (const kind of ['radicado', 'rechazo']) append(c, event(kind, { fileId: '8' }));
   assert.equal(D.status(c), 'Rechazada');
   assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /subsanación/);
   append(c, event('subsanacion'));
@@ -66,7 +125,7 @@ test('verifica, radica, subsana, cobra, concilia y archiva', () => {
 });
 
 test('requiere dos solicitudes, justificación para el traslado temprano y confirmación para la tutela', () => {
-  const c = caseData();
+  const c = caseData({ events: [event('fisico', { date: '2025-02-01' }), event('verificacion', { date: '2025-02-01', verificationResult: 'observada' })] });
   append(c, event('persuasivo', { date: '2025-02-01', fileIds: [] }));
   assert.match(D.validateEvent(c, event('cartera')), /dos requerimientos/);
   append(c, event('persuasivo', { fileIds: [] }));
@@ -80,7 +139,7 @@ test('requiere dos solicitudes, justificación para el traslado temprano y confi
 });
 
 test('permite cero o varios soportes del expediente y admite enlaces antiguos', () => {
-  const c = caseData({ files: [{ id: 'one' }, { id: 'two' }] });
+  const c = caseData({ files: [{ id: 'one' }, { id: 'two' }], events: [event('fisico'), event('verificacion', { verificationResult: 'observada' })] });
   assert.deepEqual(D.linkedFileIds(event('aviso', { fileId: 'one' })), ['one']);
   assert.deepEqual(D.linkedFileIds(event('aviso', { fileIds: [] })), []);
   assert.equal(D.validateEvent(c, event('aviso', { fileIds: ['one', 'two'] })), '');
