@@ -40,12 +40,15 @@ const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&
 const fmt = (s) => s ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(s + 'T12:00:00Z')) : 'Sin fecha';
 const money = (v) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v);
 const initials = (name) => name.trim().split(/\s+/).slice(0, 2).map((v) => v[0].toUpperCase()).join('');
-const opt = (v, label = v, selected = false) => `<option value="${esc(v)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
+const opt = (v, label = v, selected = false, disabled = false) =>
+  `<option value="${esc(v)}"${selected ? ' selected' : ''}${disabled ? ' disabled' : ''}>${esc(label)}</option>`;
 const btn = (label, action, symbol = '', extra = '') => `<button type="button" class="btn ${extra}" data-action="${action}">${symbol ? icon(symbol, 17) : ''}${label}</button>`;
 const empty = (heading, text, symbol = 'folder', action = '') => `<div class="empty"><span class="empty-icon">${icon(symbol, 25)}</span><strong>${heading}</strong><p>${text}</p>${action}</div>`;
+const verifiedLabel = 'Documentos verificados y aceptados';
+const statusLabel = (state) => state === 'Verificada' ? verifiedLabel : state;
 const pill = (s) => {
   const color = ['Pagada', 'Conciliada', 'Archivada', 'Verificada'].includes(s) ? 'green' : ['Rechazada', 'Vencida'].includes(s) ? 'red' : ['Transcrita', 'Cobrada'].includes(s) ? 'blue' : 'amber';
-  return `<span class="pill ${color}"><i></i>${esc(s)}</span>`;
+  return `<span class="pill ${color}"><i></i>${esc(statusLabel(s))}</span>`;
 };
 const logo = () => `<div class="brand"><div class="brand-mark">${icon('logo', 25)}</div><div><strong>Nexo Salud</strong><span>Gestión de incapacidades</span></div></div>`;
 function notice(message, error = false) {
@@ -113,7 +116,7 @@ function matching() {
 function expedientes() {
   const states = [...new Set(data.cases.map(D.status))];
   return `${heading('Expedientes', 'Consulta incapacidades, licencias y su historial de gestión.', btn('Nuevo expediente', 'new', 'plus', 'primary'))}
-  <section class="panel"><div class="toolbar"><label class="search">${icon('search', 18)}<input name="filter" placeholder="Buscar por nombre, documento o entidad" aria-label="Buscar expedientes" value="${esc(filter)}"></label><select name="stateFilter" aria-label="Estado">${opt('', 'Todos los estados')}${states.map((s) => opt(s, s, s === stateFilter)).join('')}</select><select name="sortBy" aria-label="Orden del archivo">${opt('', 'Más recientes')}${opt('entity', 'Entidad y fecha de inicio', !!sortBy)}</select></div><div id="case-table">${table(matching())}</div></section>`;
+  <section class="panel"><div class="toolbar"><label class="search">${icon('search', 18)}<input name="filter" placeholder="Buscar por nombre, documento o entidad" aria-label="Buscar expedientes" value="${esc(filter)}"></label><select name="stateFilter" aria-label="Estado">${opt('', 'Todos los estados')}${states.map((s) => opt(s, statusLabel(s), s === stateFilter)).join('')}</select><select name="sortBy" aria-label="Orden del archivo">${opt('', 'Más recientes')}${opt('entity', 'Entidad y fecha de inicio', !!sortBy)}</select></div><div id="case-table">${table(matching())}</div></section>`;
 }
 function alertas() {
   const items = allAlerts();
@@ -161,7 +164,7 @@ function history(c) {
     const downloadButtons = supports.map((file) => btn(esc(file.kind + ' · ' + file.name), 'file:' + esc(file.id), 'download'));
     const [label, actor] = D.actions[event.type];
     const result = event.type === 'verificacion'
-      ? (event.verificationResult === 'observada' ? 'Requiere correcciones' : 'Completa y correcta')
+      ? (event.verificationResult === 'observada' ? 'Requiere correcciones' : verifiedLabel)
       : '';
     return `<div>
       <span class="metric-icon lilac">${icon('clock', 17)}</span>
@@ -249,18 +252,42 @@ function newCase() {
 function eventDialog() {
   const c = data.cases.find((item) => item.id === currentId);
   const required = D.requiredStep(c);
-  const groups = Object.entries(D.availableActionGroups(c)).map(([id, { label }]) => [id, label]);
-  const actionFields = required
-    ? field('Gestión obligatoria', `<input value="${esc(D.actions[required][0])}" readonly>`, true) + input('type', `type="hidden" value="${required}"`)
-    : field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
-      field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled'), true);
-  const hint = required ? 'Completa esta gestión para continuar con el expediente.' : 'Elige un tipo de gestión para ver las opciones disponibles.';
-  modal('Registrar gestión', hint, 'event-form', actionFields +
+  const groups = Object.entries(D.actionGroups).map(([id, { label }]) => [id, label, !!required && id === 'recepcion']);
+  const hint = required
+    ? 'Siguiente gestión obligatoria · ' + D.actions[required][0]
+    : 'Consulta las 25 gestiones por tipo. Las que aparecen en gris se habilitan según el expediente.';
+  modal('Registrar gestión', hint, 'event-form',
+    field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
+    field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled aria-describedby="event-availability"'), true) +
+    '<p id="event-availability" class="muted wide" aria-live="polite" hidden></p>' +
     field('Fecha', dateInput('date')) + field('Responsable', input('actor', 'maxlength="120"')) +
     '<div id="event-extra" class="wide form-grid"></div>' + field('Descripción o referencia', textArea('note'), true));
-  dialog.querySelector('[name="date"]').value = D.today();
-  dialog.querySelector('[name="note"]').required = true;
-  if (required) eventExtra(required);
+  const form = dialog.querySelector('#event-form');
+  form.elements.date.value = D.today();
+  form.elements.note.required = true;
+  if (required) updateEventGroup(form, required);
+}
+function updateEventGroup(form, selected = '') {
+  const c = data.cases.find((item) => item.id === currentId);
+  const id = form.elements.group.value;
+  const group = D.actionGroups[id];
+  const allowed = D.availableActionGroups(c)[id]?.actions || {};
+  const options = Object.entries(group?.actions || {}).map(([type, [label]]) =>
+    opt(type, label, type === selected, !Object.hasOwn(allowed, type)));
+  const typeSelect = form.elements.type;
+  typeSelect.innerHTML = opt('', group ? 'Seleccionar gestión' : 'Primero selecciona un tipo de gestión') + options.join('');
+  typeSelect.disabled = !group;
+  const notice = form.querySelector('#event-availability');
+  const required = D.requiredStep(c);
+  const messages = {
+    cartera: 'Cartera y Jurídica se habilitan con un rechazo o cuando corresponda escalar un cobro pendiente.',
+    rehabilitacion: 'Estas gestiones se habilitan para incapacidades con 120 días acumulados o más.'
+  };
+  notice.hidden = !group || Object.keys(allowed).length > 0;
+  notice.textContent = required
+    ? 'Registra la gestión obligatoria de Recepción y documentos para continuar.'
+    : messages[id] || 'Este tipo de gestión todavía no está disponible en el expediente.';
+  eventExtra(typeSelect.value);
 }
 function eventExtra(type) {
   const c = data.cases.find((item) => item.id === currentId);
@@ -289,13 +316,17 @@ function eventExtra(type) {
     archivo: 'Confirma el cotejo con el expediente físico y la entrega a Gestión Documental.',
     concepto: 'Indica si el concepto fue favorable o desfavorable y a quién se comunicó.'
   };
-  const verificationOptions = [['observada', 'Requiere correcciones o faltan soportes']];
-  if (type === 'verificacion' && !D.missing(c).length) verificationOptions.unshift(['aprobada', 'Completa y correcta']);
+  const hasMissingFiles = type === 'verificacion' && D.missing(c).length > 0;
+  const verificationOptions = [
+    ['aprobada', verifiedLabel, false, hasMissingFiles],
+    ['observada', 'Requiere correcciones o faltan soportes']
+  ];
   const resubmission = type === 'radicado' && D.status(c) === 'Rechazada';
   const rejectionIndex = c.events.findLastIndex((event) => event.type === 'rechazo');
   const legacyCorrection = resubmission ? c.events.slice(rejectionIndex + 1).findLast((event) => event.type === 'subsanacion') : undefined;
   extras.innerHTML = (guides[type] ? '<p class="muted wide">' + esc(guides[type]) + '</p>' : '') +
     (type === 'verificacion' ? field('Resultado de la verificación', select('verificationResult', verificationOptions, 'Seleccionar resultado', 'required'), true) : '') +
+    (hasMissingFiles ? '<p class="muted wide">Adjunta los soportes requeridos para marcar la verificación como aceptada.</p>' : '') +
     (type === 'fisico' ? field('Canal de envío (opcional)', select('submissionChannel', D.receiptChannels, 'Seleccionar canal')) +
       field('Fecha de envío (opcional)', dateInput('sentDate', false)) : '') +
     (type === 'radicado' ? field(resubmission ? 'Número del nuevo radicado' : 'Número de radicado (opcional)',
@@ -371,16 +402,7 @@ document.addEventListener('change', (e) => {
   if (e.target.name === 'stateFilter') { stateFilter = e.target.value; document.querySelector('#case-table').innerHTML = table(matching()); }
   if (e.target.name === 'period' && e.target.value) { period = e.target.value; render(); }
   if (e.target.form?.id === 'event-form') {
-    if (e.target.name === 'group') {
-      const c = data.cases.find((item) => item.id === currentId);
-      const group = D.availableActionGroups(c)[e.target.value];
-      const type = e.target.form.elements.type;
-      const options = Object.entries(group?.actions || {}).map(([id, [label]]) => opt(id, label));
-      const placeholder = group ? 'Seleccionar gestión' : 'Primero selecciona un tipo de gestión';
-      type.innerHTML = opt('', placeholder) + options.join('');
-      type.disabled = !group;
-      eventExtra('');
-    }
+    if (e.target.name === 'group') updateEventGroup(e.target.form);
     if (e.target.name === 'type') eventExtra(e.target.value);
     if (e.target.name === 'response') {
       const body = e.target.form.querySelector('#response-details');
