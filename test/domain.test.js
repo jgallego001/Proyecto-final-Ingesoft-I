@@ -43,17 +43,15 @@ test('exige primero la recepción y luego la verificación, incluso con document
   assert.equal(D.requiredStep(c), 'verificacion');
   assert.match(D.pendingTask(c), /Verificación documental/);
   assert.match(D.validateEvent(c, event('fisico')), /obligatoria.*Verificación documental/);
-  assert.match(D.validateEvent(c, event('faltantes')), /obligatoria.*Verificación documental/);
+  assert.match(D.validateEvent(c, event('citacion')), /obligatoria.*Verificación documental/);
   assert.match(D.validateEvent(c, event('verificacion', { date: '2025-02-06' })), /posterior a la recepción/);
   assert.match(D.validateEvent(c, event('verificacion')), /Selecciona el resultado/);
   assert.match(D.validateEvent(c, event('verificacion', { verificationResult: 'aprobada' })), /soportes requeridos/);
   append(c, event('verificacion', { verificationResult: 'observada' }));
 
   assert.equal(D.requiredStep(c), '');
-  assert.match(D.pendingTask(c), /Solicitar correcciones/);
+  assert.equal(D.pendingTask(c), 'Recibir correcciones y volver a verificar');
   assert.match(D.validateEvent(c, event('aviso', { date: '2025-02-08' })), /posterior a una verificación/);
-  append(c, event('faltantes'));
-  assert.match(D.pendingTask(c), /volver a verificar/);
   c.files = D.required(c).map((kind) => ({ kind }));
   assert.match(D.validateEvent(c, event('radicado')), /verificación aprobada/);
   append(c, event('verificacion', { verificationResult: 'aprobada' }));
@@ -79,28 +77,42 @@ test('reconoce la verificación anterior y permite completar expedientes histór
   assert.equal(D.requiredStep(caseData({ events: [event('archivo')] })), '');
 });
 
-test('permite notificar documentos incorrectos aunque todos los archivos estén adjuntos', () => {
+test('mantiene las correcciones pendientes aunque todos los archivos estén adjuntos', () => {
   const c = caseData({ files: [D.docs[0], D.docs[1]].map((kind) => ({ kind })) });
   append(c, event('fisico'));
   append(c, event('verificacion', { verificationResult: 'observada' }));
   assert.equal(D.status(c), 'Por completar');
-  append(c, event('faltantes'));
+  assert.ok(D.availableActionGroups(c).recepcion.actions.citacion);
 });
 
-test('omite fin de semana y festivos para el segundo llamado', () => {
+test('conserva el plazo de citación sin pedir que se registren avisos', () => {
   const c = caseData();
   append(c, event('fisico', { date: '2025-01-31' }));
   append(c, event('verificacion', { date: '2025-01-31', verificationResult: 'observada' }));
-  append(c, D.prepareEvent(c, event('faltantes', { date: '2025-01-31' })));
   append(c, event('verificacion', { date: '2025-02-04', verificationResult: 'observada' }));
   const holidays = ['2025-02-03'];
-  assert.equal(D.businessDays('2025-01-31', 3, holidays), '2025-02-06');
-  assert.throws(() => D.prepareEvent(c, event('faltantes', { date: '2025-02-05' }), holidays), /tres días/);
-  const second = D.prepareEvent(c, event('faltantes', { date: '2025-02-06' }), holidays);
-  assert.equal(second.type, 'llamado');
-  append(c, second, holidays);
-  assert.throws(() => D.prepareEvent(c, event('faltantes'), holidays), /Ya se registró el segundo llamado/);
-  append(c, event('citacion'));
+  assert.ok(D.availableActionGroups(c).recepcion.actions.citacion);
+  assert.throws(() => D.prepareEvent(c, event('faltantes'), holidays), /gestiones disponibles/);
+  assert.throws(() => D.prepareEvent(c, event('citacion', { date: '2025-02-05' }), holidays), /2025-02-06/);
+  const reminders = D.alerts(c, '2025-02-05', holidays).filter((alert) => alert.kind === 'Documentación');
+  assert.deepEqual(reminders, [{ label: 'Revisar citación con Coordinación', due: '2025-02-06', kind: 'Documentación' }]);
+  append(c, D.prepareEvent(c, event('citacion', { date: '2025-02-06' }), holidays), holidays);
+  assert.equal(D.availableActionGroups(c).recepcion.actions.citacion, undefined);
+  assert.ok(!D.alerts(c).some((alert) => alert.label.includes('citación')));
+});
+
+test('permite citar expedientes con un segundo aviso guardado en versiones anteriores', () => {
+  const c = caseData({ events: [
+    event('fisico', { date: '2025-01-28' }),
+    event('verificacion', { date: '2025-01-28', verificationResult: 'observada' }),
+    event('faltantes', { date: '2025-01-29' }),
+    event('llamado', { date: '2025-02-04' })
+  ] });
+  assert.equal(D.actions.faltantes[0], 'Primera notificación de faltantes');
+  assert.equal(D.actions.llamado[0], 'Segundo llamado por faltantes');
+  assert.throws(() => D.prepareEvent(c, event('citacion', { date: '2025-02-03' })), /2025-02-04/);
+  append(c, D.prepareEvent(c, event('citacion', { date: '2025-02-04' })));
+  assert.deepEqual(c.events.map((item) => item.type), ['fisico', 'verificacion', 'faltantes', 'llamado', 'citacion']);
 });
 
 test('verifica, radica, subsana, cobra, concilia y archiva', () => {
@@ -155,11 +167,11 @@ test('permite cero o varios soportes del expediente y admite enlaces antiguos', 
   assert.match(D.validateEvent(c, event('aviso', { fileIds: 'one' })), /no es válida/);
 });
 
-test('ofrece 25 gestiones y muestra Cartera y rehabilitación cuando aplican', () => {
+test('ofrece 24 gestiones y muestra Cartera y rehabilitación cuando aplican', () => {
   const c = caseData({ events: [event('fisico'), event('verificacion', { verificationResult: 'observada' })] });
   const current = Object.values(D.actionGroups).flatMap((group) => Object.keys(group.actions));
-  assert.equal(current.length, 25);
-  for (const legacy of ['identificacion', 'revision', 'aviso', 'reemplazo', 'nomina', 'entrega', 'saldo', 'llamado', 'subsanacion']) {
+  assert.equal(current.length, 24);
+  for (const legacy of ['identificacion', 'revision', 'aviso', 'reemplazo', 'nomina', 'entrega', 'saldo', 'faltantes', 'llamado', 'subsanacion']) {
     assert.ok(D.actions[legacy]);
     assert.equal(current.includes(legacy), false);
     assert.throws(() => D.prepareEvent(c, event(legacy)), /gestiones disponibles/);

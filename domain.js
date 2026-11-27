@@ -8,7 +8,6 @@
       label: 'Recepción y documentos',
       actions: {
         fisico: ['Recepción física y ubicación del archivo', 'Administración de Personal'],
-        faltantes: ['Solicitar corrección de documentos', 'Administración de Personal'],
         citacion: ['Citación con Coordinación', 'Coordinación'],
         verificacion: ['Verificación documental', 'Administración de Personal']
       }
@@ -141,9 +140,16 @@
   function needsCorrection(c, verification = intake(c).verification) {
     return verification?.verificationResult === 'observada' || missing(c).length > 0;
   }
-  function correctionNotices(c) {
+  function coordinationDate(c, holidays = []) {
     const after = c.events.findLastIndex((event) => event.type === 'verificacion' && event.verificationResult !== 'observada') + 1;
-    return c.events.slice(after).filter((event) => ['faltantes', 'llamado', 'citacion'].includes(event.type));
+    const events = c.events.slice(after);
+    if (events.some((event) => event.type === 'citacion')) return '';
+    const secondNotice = events.find((event) => event.type === 'llamado');
+    if (secondNotice) return secondNotice.date;
+    const firstNotice = events.find((event) => event.type === 'faltantes');
+    const review = events.find((event) => event.type === 'verificacion' && event.verificationResult === 'observada');
+    const reference = firstNotice || review;
+    return reference ? businessDays(reference.date, 3, holidays) : '';
   }
   function collection(c) {
     const after = c.events.indexOf(last(c, 'aceptacion')) + 1;
@@ -158,7 +164,6 @@
   function availableActionGroups(c, now = today()) {
     const state = status(c);
     const step = requiredStep(c);
-    const notices = correctionNotices(c);
     const promise = paymentPromise(c);
     const showCollection = paymentPending(state);
     const showLegal = state === 'Rechazada' || (showCollection && (collection(c) || (promise && promise < now)));
@@ -169,8 +174,7 @@
         if (step) return type === step;
         if (type === 'respuesta') return state === 'Transcrita';
         if (type === 'cobro') return showCollection;
-        if (type === 'faltantes') return needsCorrection(c) && !notices.some((event) => event.type === 'llamado');
-        if (type === 'citacion') return needsCorrection(c) && notices.at(-1)?.type === 'llamado';
+        if (type === 'citacion') return needsCorrection(c) && !!coordinationDate(c);
         return true;
       });
       return options.length ? [[id, { label: group.label, actions: Object.fromEntries(options) }]] : [];
@@ -202,8 +206,7 @@
       case 'Pago parcial': return collection(c) ? 'Dar seguimiento al pago pendiente' : 'Solicitar el pago a la entidad';
       case 'Transcrita': return 'Registrar la respuesta de la EPS / ARL';
       case 'Rechazada': return 'Corregir el rechazo y registrar la nueva radicación';
-      case 'Por completar':
-        return correctionNotices(c).length ? 'Recibir correcciones y volver a verificar' : 'Solicitar correcciones o soportes faltantes';
+      case 'Por completar': return 'Recibir correcciones y volver a verificar';
       default: return 'Transcribir y radicar ante la EPS / ARL';
     }
   }
@@ -225,11 +228,8 @@
     const step = requiredStep(c);
     if (step) push(actions[step][0], '', 'Recepción y documentos');
     if (!step && needsCorrection(c)) {
-      const notices = correctionNotices(c);
-      const firstNotice = notices.find((event) => event.type === 'faltantes');
-      if (!firstNotice) push('Solicitar correcciones o soportes faltantes', c.received, 'Documentación');
-      else if (!notices.some((event) => event.type === 'llamado')) push('Segundo llamado por faltantes', businessDays(firstNotice.date, 3, holidays), 'Documentación');
-      else if (!notices.some((event) => event.type === 'citacion')) push('Revisar citación con Coordinación', '', 'Documentación');
+      const due = coordinationDate(c, holidays);
+      if (due) push('Revisar citación con Coordinación', due, 'Documentación');
     }
     const state = status(c);
     if (state === 'Transcrita') push('Respuesta de EPS / ARL pendiente', '', 'Radicación');
@@ -268,7 +268,6 @@
       if (status(c) !== 'Transcrita') throw Error('Registra una radicación pendiente de respuesta.');
       recordType = response;
     }
-    if (type === 'faltantes' && correctionNotices(c).some((event) => event.type === 'faltantes')) recordType = 'llamado';
     if (type === 'cobro' && collection(c)) recordType = 'seguimiento';
     const event = { ...fields, type: recordType };
     const error = validateEvent(c, event, holidays);
@@ -294,14 +293,11 @@
     if (e.fileIds !== undefined && !Array.isArray(e.fileIds)) return 'La selección de soportes no es válida.';
     const available = new Set(c.files.map((file) => file.id));
     if (linkedFileIds(e).some((id) => !available.has(id))) return 'Selecciona soportes de este expediente.';
-    if (e.type === 'faltantes' && !needsCorrection(c)) return 'La documentación ya está completa y aprobada.';
-    if (e.type === 'llamado') {
-      const notices = correctionNotices(c);
-      const first = notices.find((event) => event.type === 'faltantes');
-      if (!first || !needsCorrection(c) || e.date < businessDays(first.date, 3, holidays)) return 'El segundo llamado requiere correcciones pendientes y que se cumplan los tres días hábiles.';
-      if (notices.some((event) => event.type === 'llamado')) return 'Ya se registró el segundo llamado por estas correcciones.';
+    if (e.type === 'citacion') {
+      const due = coordinationDate(c, holidays);
+      if (!needsCorrection(c) || !due) return 'La citación requiere correcciones pendientes y que aún no se haya registrado para esta revisión.';
+      if (e.date < due) return 'La citación se puede registrar a partir de ' + due + '.';
     }
-    if (e.type === 'citacion' && !correctionNotices(c).some((event) => event.type === 'llamado' && event.date <= e.date)) return 'Registra primero el segundo llamado.';
     if (e.type === 'radicado' && status(c) === 'Rechazada') {
       if (last(c, 'rechazo').date > e.date) return 'La nueva radicación debe ser igual o posterior al rechazo.';
       if (!e.correction?.trim() || !e.filingNumber?.trim()) return 'Indica la corrección realizada y el número del nuevo radicado.';

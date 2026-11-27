@@ -255,7 +255,7 @@ function eventDialog() {
   const groups = Object.entries(D.actionGroups).map(([id, { label }]) => [id, label, !!required && id === 'recepcion']);
   const hint = required
     ? 'Siguiente gestión obligatoria · ' + D.actions[required][0]
-    : 'Consulta las 25 gestiones por tipo. Las que aparecen en gris se habilitan según el expediente.';
+    : 'Consulta las gestiones por tipo. Las que aparecen en gris se habilitan según el expediente.';
   modal('Registrar gestión', hint, 'event-form',
     field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
     field('Gestión', select('type', [], 'Primero selecciona un tipo de gestión', 'required disabled aria-describedby="event-availability"'), true) +
@@ -312,7 +312,7 @@ function eventExtra(type) {
     radicado: 'Registra número de radicado, canal y formato usado. Canal habitual: ' + D.channel(c.entity) + '.',
     pago: 'Registra el valor y los días que corresponden a este expediente. Anota la referencia de la transferencia en la descripción.',
     cobro: 'Anota el contacto con la entidad, el resultado y el próximo compromiso de pago si lo hay.',
-    faltantes: 'Indica qué documentos se deben corregir o adjuntar y cómo se notificó al colaborador.',
+    citacion: 'Deja constancia de las correcciones pendientes y de los avisos previos al colaborador.',
     archivo: 'Confirma el cotejo con el expediente físico y la entrega a Gestión Documental.',
     concepto: 'Indica si el concepto fue favorable o desfavorable y a quién se comunicó.'
   };
