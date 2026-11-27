@@ -168,6 +168,9 @@ function history(c) {
       <span><strong>${esc(label)}</strong>
         <small>${fmt(event.date)} · ${esc(event.actor || actor)}${event.amount ? ' · ' + money(event.amount) : ''}${event.paidDays ? ' · ' + esc(event.paidDays) + ' días pagados' : ''}${event.due ? ' · Promesa ' + fmt(event.due) : ''}</small>
         ${result ? `<small>Resultado · ${esc(result)}</small>` : ''}
+        ${event.sentDate || event.submissionChannel ? `<small>Envío · ${[event.sentDate ? fmt(event.sentDate) : '', esc(event.submissionChannel)].filter(Boolean).join(' · ')}</small>` : ''}
+        ${event.filingNumber ? `<small>Radicado · ${esc(event.filingNumber)}</small>` : ''}
+        ${event.correction ? `<p>Corrección · ${esc(event.correction)}</p>` : ''}
         <p>${esc(event.note)}</p>
         ${downloadButtons.length ? `<span class="history-supports">${downloadButtons.join('')}</span>` : ''}
       </span>
@@ -235,7 +238,7 @@ function newCase() {
     field('Tipo de novedad', select('type', D.types, 'Seleccionar tipo', 'required')) +
     field('EPS / ARL', input('entity', 'list="entities" required maxlength="100"') + `<datalist id="entities">${D.entities.map((s) => opt(s)).join('')}</datalist>`) +
     field('Inicio', dateInput('start')) + field('Fin', dateInput('end')) + field('Fecha de emisión', dateInput('issued')) + field('Fecha de recepción', dateInput('received')) +
-    field('Canal de recepción', select('receipt', ['Recepción', 'Oficinas principales', 'Líder comercial', 'Correo electrónico', 'Gestión Humana'], 'Seleccionar canal', 'required')) +
+    field('Canal de recepción', select('receipt', D.receiptChannels, 'Seleccionar canal', 'required')) +
     field('Días acumulados previos de la cadena', input('prior', 'type="number" min="0" step="1" value="0"')) +
     field('IBC mensual (COP)', input('ibc', 'type="number" min="0" step="1"')) +
     field('Ya transcrita por EPS', '<input name="transcribed" type="checkbox">') +
@@ -246,7 +249,7 @@ function newCase() {
 function eventDialog() {
   const c = data.cases.find((item) => item.id === currentId);
   const required = D.requiredStep(c);
-  const groups = Object.entries(D.actionGroups).map(([id, { label }]) => [id, label]);
+  const groups = Object.entries(D.availableActionGroups(c)).map(([id, { label }]) => [id, label]);
   const actionFields = required
     ? field('Gestión obligatoria', `<input value="${esc(D.actions[required][0])}" readonly>`, true) + input('type', `type="hidden" value="${required}"`)
     : field('Tipo de gestión', select('group', groups, 'Seleccionar tipo', 'required'), true) +
@@ -280,21 +283,36 @@ function eventExtra(type) {
     verificacion: 'Indica si la documentación está completa y correcta. Si requiere correcciones, detállalas en la descripción.',
     fisico: 'Anota la ubicación por entidad y fecha de inicio. Confirma la recepción del original y el escaneo del soporte.',
     radicado: 'Registra número de radicado, canal y formato usado. Canal habitual: ' + D.channel(c.entity) + '.',
-    rechazo: 'Registra la causal informada por la entidad.',
-    pago: 'Registra la transferencia con la referencia de Tesorería y los días cubiertos.',
+    pago: 'Registra el valor y los días que corresponden a este expediente. Anota la referencia de la transferencia en la descripción.',
+    cobro: 'Anota el contacto con la entidad, el resultado y el próximo compromiso de pago si lo hay.',
+    faltantes: 'Indica qué documentos se deben corregir o adjuntar y cómo se notificó al colaborador.',
     archivo: 'Confirma el cotejo con el expediente físico y la entrega a Gestión Documental.',
-    concepto: 'Indica si el concepto fue favorable o desfavorable y a quién se comunicó.',
-    saldo: 'Indica la comunicación a Contabilidad y la solicitud de ayuda al asesor de la entidad.'
+    concepto: 'Indica si el concepto fue favorable o desfavorable y a quién se comunicó.'
   };
   const verificationOptions = [['observada', 'Requiere correcciones o faltan soportes']];
   if (type === 'verificacion' && !D.missing(c).length) verificationOptions.unshift(['aprobada', 'Completa y correcta']);
+  const resubmission = type === 'radicado' && D.status(c) === 'Rechazada';
+  const rejectionIndex = c.events.findLastIndex((event) => event.type === 'rechazo');
+  const legacyCorrection = resubmission ? c.events.slice(rejectionIndex + 1).findLast((event) => event.type === 'subsanacion') : undefined;
   extras.innerHTML = (guides[type] ? '<p class="muted wide">' + esc(guides[type]) + '</p>' : '') +
     (type === 'verificacion' ? field('Resultado de la verificación', select('verificationResult', verificationOptions, 'Seleccionar resultado', 'required'), true) : '') +
-    (['aceptacion', 'pago', 'reintegro'].includes(type) ? field('Valor (COP)', input('amount', 'type="number" min="0.01" step="0.01" required')) : '') +
+    (type === 'fisico' ? field('Canal de envío (opcional)', select('submissionChannel', D.receiptChannels, 'Seleccionar canal')) +
+      field('Fecha de envío (opcional)', dateInput('sentDate', false)) : '') +
+    (type === 'radicado' ? field(resubmission ? 'Número del nuevo radicado' : 'Número de radicado (opcional)',
+      input('filingNumber', 'maxlength="120"' + (resubmission ? ' required' : '')), true) : '') +
+    (resubmission ? field('Corrección realizada', '<textarea name="correction" rows="2" maxlength="3000" required>' + esc(legacyCorrection?.note) + '</textarea>', true) : '') +
+    (type === 'respuesta' ? field('Resultado de la radicación', select('response', [['aceptacion', 'Aceptada'], ['rechazo', 'Rechazada']], 'Seleccionar resultado', 'required'), true) +
+      '<div id="response-details" class="wide form-grid"></div>' : '') +
+    (['pago', 'reintegro'].includes(type) ? amountField() : '') +
     (type === 'pago' ? field('Días pagados', input('paidDays', 'type="number" min="1" step="1" required')) : '') +
-    (['aceptacion', 'acuerdo'].includes(type) ? field('Fecha prometida', dateInput('due')) : '') +
+    (type === 'acuerdo' ? field('Fecha prometida', dateInput('due')) : '') +
     (type ? proof : '') +
     (checks[type] ? `<label class="wide check-field"><input type="checkbox" name="exception"> ${checks[type]}</label>` : '');
+  const channel = extras.querySelector('[name="submissionChannel"]');
+  if (channel && D.receiptChannels.includes(c.receipt)) channel.value = c.receipt;
+}
+function amountField() {
+  return field('Valor (COP)', input('amount', 'type="number" min="0.01" step="0.01" required'));
 }
 async function work(fn, form) {
   if (working) return;
@@ -354,7 +372,8 @@ document.addEventListener('change', (e) => {
   if (e.target.name === 'period' && e.target.value) { period = e.target.value; render(); }
   if (e.target.form?.id === 'event-form') {
     if (e.target.name === 'group') {
-      const group = D.actionGroups[e.target.value];
+      const c = data.cases.find((item) => item.id === currentId);
+      const group = D.availableActionGroups(c)[e.target.value];
       const type = e.target.form.elements.type;
       const options = Object.entries(group?.actions || {}).map(([id, [label]]) => opt(id, label));
       const placeholder = group ? 'Seleccionar gestión' : 'Primero selecciona un tipo de gestión';
@@ -363,6 +382,13 @@ document.addEventListener('change', (e) => {
       eventExtra('');
     }
     if (e.target.name === 'type') eventExtra(e.target.value);
+    if (e.target.name === 'response') {
+      const body = e.target.form.querySelector('#response-details');
+      body.innerHTML = {
+        aceptacion: amountField() + field('Fecha prometida', dateInput('due')),
+        rechazo: '<p class="muted wide">Anota en la descripción la causal que informó la entidad.</p>'
+      }[e.target.value] || '';
+    }
   }
   if (e.target.name === 'type' && e.target.form?.id === 'new-case') {
     const show = [D.types[4], D.types[5]].includes(e.target.value);

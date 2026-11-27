@@ -75,7 +75,7 @@ test('reconoce la verificación anterior y permite completar expedientes histór
   assert.equal(D.requiredStep(started), 'verificacion');
   assert.match(D.validateEvent(started, event('revision')), /obligatoria.*Verificación documental/);
   append(started, event('verificacion', { verificationResult: 'aprobada' }));
-  append(started, event('revision'));
+  append(started, D.prepareEvent(started, event('respuesta', { response: 'rechazo' })));
   assert.equal(D.requiredStep(caseData({ events: [event('archivo')] })), '');
 });
 
@@ -91,11 +91,15 @@ test('omite fin de semana y festivos para el segundo llamado', () => {
   const c = caseData();
   append(c, event('fisico', { date: '2025-01-31' }));
   append(c, event('verificacion', { date: '2025-01-31', verificationResult: 'observada' }));
-  append(c, event('faltantes', { date: '2025-01-31' }));
+  append(c, D.prepareEvent(c, event('faltantes', { date: '2025-01-31' })));
+  append(c, event('verificacion', { date: '2025-02-04', verificationResult: 'observada' }));
   const holidays = ['2025-02-03'];
   assert.equal(D.businessDays('2025-01-31', 3, holidays), '2025-02-06');
-  assert.match(D.validateEvent(c, event('llamado', { date: '2025-02-05' }), holidays), /tres días/);
-  append(c, event('llamado', { date: '2025-02-06' }), holidays);
+  assert.throws(() => D.prepareEvent(c, event('faltantes', { date: '2025-02-05' }), holidays), /tres días/);
+  const second = D.prepareEvent(c, event('faltantes', { date: '2025-02-06' }), holidays);
+  assert.equal(second.type, 'llamado');
+  append(c, second, holidays);
+  assert.throws(() => D.prepareEvent(c, event('faltantes'), holidays), /Ya se registró el segundo llamado/);
   append(c, event('citacion'));
 });
 
@@ -104,21 +108,25 @@ test('verifica, radica, subsana, cobra, concilia y archiva', () => {
   assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /obligatoria.*Recepción física/);
   append(c, event('fisico'));
   append(c, event('verificacion', { verificationResult: 'aprobada' }));
-  for (const kind of ['radicado', 'rechazo']) append(c, event(kind, { fileId: '8' }));
-  assert.equal(D.status(c), 'Rechazada');
-  assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /subsanación/);
-  append(c, event('subsanacion'));
   append(c, event('radicado', { fileId: '8' }));
-  append(c, event('aceptacion', { amount: 0.3, due: '2025-03-10' }));
-  append(c, event('cobro', { fileIds: [] }));
-  append(c, event('seguimiento', { fileIds: ['0', '8'] }));
+  append(c, D.prepareEvent(c, event('respuesta', { response: 'rechazo' })));
+  assert.equal(D.status(c), 'Rechazada');
+  assert.match(D.validateEvent(c, event('radicado', { fileId: '8' })), /corrección realizada/);
+  assert.throws(() => D.prepareEvent(c, event('respuesta', { response: 'aceptacion' })), /pendiente de respuesta/);
+  append(c, D.prepareEvent(c, event('radicado', { correction: 'Se corrigió la fecha', filingNumber: 'A002', fileId: '8' })));
+  append(c, D.prepareEvent(c, event('respuesta', { response: 'aceptacion', amount: 0.3, due: '2025-03-10' })));
+  const request = D.prepareEvent(c, event('cobro', { fileIds: [] }));
+  assert.equal(request.type, 'cobro');
+  append(c, request);
+  const followup = D.prepareEvent(c, event('cobro', { fileIds: ['0', '8'] }));
+  assert.equal(followup.type, 'seguimiento');
+  append(c, followup);
   append(c, event('pago', { amount: 0.1, paidDays: 1 }));
   assert.equal(D.status(c), 'Pago parcial');
   append(c, event('pago', { amount: 0.2, paidDays: 2 }));
   assert.deepEqual(D.totals(c), { paid: 0.3, approved: 0.3, due: 0 });
-  assert.match(D.validateEvent(c, event('conciliacion')), /detalle/);
-  append(c, event('identificacion'));
-  append(c, event('conciliacion'));
+  assert.equal(D.pendingTask(c), 'Conciliar el pago');
+  append(c, D.prepareEvent(c, event('conciliacion')));
   assert.match(D.validateEvent(c, event('archivo')), /confirma/);
   append(c, event('archivo', { exception: true }));
   assert.equal(D.status(c), 'Archivada');
@@ -145,6 +153,28 @@ test('permite cero o varios soportes del expediente y admite enlaces antiguos', 
   assert.equal(D.validateEvent(c, event('aviso', { fileIds: ['one', 'two'] })), '');
   assert.match(D.validateEvent(c, event('aviso', { fileIds: ['one', 'other-case'] })), /este expediente/);
   assert.match(D.validateEvent(c, event('aviso', { fileIds: 'one' })), /no es válida/);
+});
+
+test('ofrece 25 gestiones y muestra Cartera y rehabilitación cuando aplican', () => {
+  const c = caseData({ events: [event('fisico'), event('verificacion', { verificationResult: 'observada' })] });
+  const current = Object.values(D.actionGroups).flatMap((group) => Object.keys(group.actions));
+  assert.equal(current.length, 25);
+  for (const legacy of ['identificacion', 'revision', 'aviso', 'reemplazo', 'nomina', 'entrega', 'saldo', 'llamado', 'subsanacion']) {
+    assert.ok(D.actions[legacy]);
+    assert.equal(current.includes(legacy), false);
+    assert.throws(() => D.prepareEvent(c, event(legacy)), /gestiones disponibles/);
+  }
+  assert.equal(D.availableActionGroups(c).cartera, undefined);
+  assert.equal(D.availableActionGroups(c).rehabilitacion, undefined);
+  assert.ok(D.availableActionGroups({ ...c, prior: 119 }).rehabilitacion);
+
+  c.events.push(event('radicado'));
+  assert.ok(D.availableActionGroups(c).radicacion.actions.respuesta);
+  assert.ok(D.alerts(c).some((alert) => alert.label === 'Respuesta de EPS / ARL pendiente'));
+  assert.ok(!D.alerts(c).some((alert) => alert.label.includes('diaria')));
+  c.events.push(event('aceptacion', { due: '2025-02-20', amount: 50000 }));
+  assert.equal(D.availableActionGroups(c, '2025-02-14').cartera, undefined);
+  assert.ok(D.availableActionGroups(c, '2025-02-21').cartera);
 });
 
 test('estima tramos y genera alertas de rehabilitación', () => {

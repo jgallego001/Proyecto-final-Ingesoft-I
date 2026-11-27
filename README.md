@@ -13,9 +13,10 @@ Descarga el paquete de tu sistema desde [GitHub Releases](https://github.com/jga
 ## Primer expediente
 
 1. En Vista general, pulsa **Nuevo expediente** y registra la recepción.
-2. En **Registrar gestión**, guarda primero **Recepción física y ubicación del archivo**. Luego registra **Verificación documental** con su resultado. Puedes adjuntar archivos en **Soportes** durante la revisión. El detalle y la lista de expedientes muestran qué gestión está pendiente.
+2. En **Registrar gestión**, guarda primero **Recepción física y ubicación del archivo**. Luego registra **Verificación documental** con su resultado. Puedes adjuntar archivos en **Soportes** durante la revisión. El detalle y la lista de expedientes muestran qué gestión está pendiente. Si necesitas documentar cuándo se enviaron los soportes, agrega la fecha y el canal en la recepción física.
 3. Si la revisión requiere correcciones, regístralas y vuelve a verificar. Radica cuando una verificación confirme que la documentación está completa y correcta. En **Soportes vinculados**, marca los archivos del expediente que correspondan a la gestión. Puedes guardar sin marcar ninguno y consultar los archivos vinculados en **Historial**.
-4. En **Reportes**, selecciona un mes, exporta a CSV y registra el envío. En **Configuración**, agrega los festivos que deban excluirse de los días hábiles.
+4. Tras radicar, usa **Respuesta de EPS / ARL** para guardar la aceptación o el rechazo. En un reenvío, registra la corrección y el nuevo número en **Radicación**. Usa **Gestión de cobro** para la solicitud inicial y los seguimientos. Después de registrar **Pago de EPS / ARL**, puedes conciliar.
+5. En **Reportes**, selecciona un mes, exporta a CSV y registra el envío. En **Configuración**, agrega los festivos que deban excluirse de los días hábiles.
 
 Los trámites externos se hacen por los canales de cada entidad. La aplicación calcula vencimientos y registra gestiones, fechas, responsables y evidencia. El archivo final elimina la copia clínica almacenada y requiere confirmar la disposición de los originales físicos. Gestiona por separado las copias que se hayan exportado.
 

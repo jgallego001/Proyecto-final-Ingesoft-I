@@ -1,46 +1,36 @@
 (function (root) {
   const types = ['Enfermedad general', 'Enfermedad laboral', 'Accidente laboral', 'Accidente de tránsito', 'Licencia de maternidad', 'Licencia de paternidad', 'Otra licencia'];
   const entities = ['Salud Total', 'Nueva EPS', 'SOS', 'Sanitas', 'SURA EPS', 'Asmet Salud', 'ARL SURA', 'Famisanar'];
+  const receiptChannels = ['Recepción', 'Oficinas principales', 'Líder comercial', 'Correo electrónico', 'Gestión Humana'];
   const docs = ['Certificado original', 'Epicrisis / soporte médico', 'FURIPS', 'Certificado de nacido vivo', 'Registro civil', 'Documento de identidad', 'Documento de identidad de la madre', 'Liquidación', 'Evidencia de gestión'];
   const actionGroups = {
     recepcion: {
       label: 'Recepción y documentos',
       actions: {
-        aviso: ['Aviso inmediato al jefe y a Administración de Personal', 'Colaborador'],
-        reemplazo: ['Asignación de reemplazo', 'Líder'],
-        entrega: ['Remisión de soportes', 'Colaborador'],
         fisico: ['Recepción física y ubicación del archivo', 'Administración de Personal'],
-        faltantes: ['Primera notificación de faltantes', 'Administración de Personal'],
-        llamado: ['Segundo llamado por faltantes', 'Administración de Personal'],
+        faltantes: ['Solicitar corrección de documentos', 'Administración de Personal'],
         citacion: ['Citación con Coordinación', 'Coordinación'],
         verificacion: ['Verificación documental', 'Administración de Personal']
       }
     },
     radicacion: {
-      label: 'Radicación, rechazos y nómina',
+      label: 'Radicación y respuesta de EPS / ARL',
       actions: {
-        radicado: ['Transcripción / radicación', 'Administración de Personal'],
+        radicado: ['Radicación', 'Administración de Personal'],
+        respuesta: ['Respuesta de EPS / ARL', 'EPS / ARL'],
         directo: ['Traslado del trámite al colaborador', 'Administración de Personal'],
-        rechazo: ['Rechazo y causal', 'EPS / ARL'],
-        subsanacion: ['Subsanación del rechazo', 'Administración de Personal'],
-        nomina: ['Entrega o devolución de soportes de nómina', 'Nómina']
       }
     },
     cobro: {
       label: 'Cobro y seguimiento',
       actions: {
-        revision: ['Revisión diaria de entidad', 'Administración de Personal'],
-        aceptacion: ['Aceptación y fecha prometida de pago', 'EPS / ARL'],
-        cobro: ['Solicitud semanal de pago', 'Administración de Personal'],
-        seguimiento: ['Seguimiento semanal de cobro', 'Administración de Personal'],
+        cobro: ['Gestión de cobro', 'Administración de Personal'],
         acuerdo: ['Comunicación y acuerdo de pago', 'Coordinación']
       }
     },
     pagos: {
       label: 'Pagos y conciliación',
       actions: {
-        identificacion: ['Identificación del detalle de pago', 'Administración de Personal'],
-        saldo: ['Saldo sin identificar / aviso a Contabilidad y entidad', 'Administración de Personal'],
         pago: ['Pago de EPS / ARL', 'Tesorería'],
         conciliacion: ['Conciliación contable', 'Contabilidad']
       }
@@ -75,7 +65,25 @@
       }
     }
   };
-  const actions = Object.assign({}, ...Object.values(actionGroups).map((group) => group.actions));
+  const registerable = Object.assign({}, ...Object.values(actionGroups).map((group) => group.actions));
+  const actions = {
+    ...registerable,
+    aviso: ['Aviso inmediato al jefe y a Administración de Personal', 'Colaborador'],
+    reemplazo: ['Asignación de reemplazo', 'Líder'],
+    entrega: ['Remisión de soportes', 'Colaborador'],
+    llamado: ['Segundo llamado por faltantes', 'Administración de Personal'],
+    rechazo: ['Rechazo y causal', 'EPS / ARL'],
+    subsanacion: ['Subsanación del rechazo', 'Administración de Personal'],
+    nomina: ['Entrega o devolución de soportes de nómina', 'Nómina'],
+    revision: ['Revisión diaria de entidad', 'Administración de Personal'],
+    aceptacion: ['Aceptación y fecha prometida de pago', 'EPS / ARL'],
+    seguimiento: ['Seguimiento semanal de cobro', 'Administración de Personal'],
+    identificacion: ['Identificación del detalle de pago', 'Administración de Personal'],
+    saldo: ['Saldo sin identificar / aviso a Contabilidad y entidad', 'Administración de Personal'],
+    faltantes: ['Primera notificación de faltantes', 'Administración de Personal'],
+    radicado: ['Transcripción / radicación', 'Administración de Personal'],
+    cobro: ['Solicitud semanal de pago', 'Administración de Personal']
+  };
   const date = (s) => new Date(s + 'T00:00:00Z');
   const iso = (d) => d.toISOString().slice(0, 10);
   const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -133,6 +141,41 @@
   function needsCorrection(c, verification = intake(c).verification) {
     return verification?.verificationResult === 'observada' || missing(c).length > 0;
   }
+  function correctionNotices(c) {
+    const after = c.events.findLastIndex((event) => event.type === 'verificacion' && event.verificationResult !== 'observada') + 1;
+    return c.events.slice(after).filter((event) => ['faltantes', 'llamado', 'citacion'].includes(event.type));
+  }
+  function collection(c) {
+    const after = c.events.indexOf(last(c, 'aceptacion')) + 1;
+    return c.events.slice(after).findLast((event) => ['cobro', 'seguimiento'].includes(event.type));
+  }
+  function paymentPromise(c) {
+    const accepted = last(c, 'aceptacion');
+    const agreement = last(c, 'acuerdo');
+    return c.events.indexOf(agreement) > c.events.indexOf(accepted) ? agreement.due : accepted?.due;
+  }
+  const paymentPending = (state) => ['Cobrada', 'Pago parcial'].includes(state);
+  function availableActionGroups(c, now = today()) {
+    const state = status(c);
+    const step = requiredStep(c);
+    const notices = correctionNotices(c);
+    const promise = paymentPromise(c);
+    const showCollection = paymentPending(state);
+    const showLegal = state === 'Rechazada' || (showCollection && (collection(c) || (promise && promise < now)));
+    return Object.fromEntries(Object.entries(actionGroups).flatMap(([id, group]) => {
+      if (state === 'Archivada' || (id === 'cartera' && !showLegal) ||
+          (id === 'rehabilitacion' && Number(c.prior || 0) + days(c) < 120)) return [];
+      const options = Object.entries(group.actions).filter(([type]) => {
+        if (step) return type === step;
+        if (type === 'respuesta') return state === 'Transcrita';
+        if (type === 'cobro') return showCollection;
+        if (type === 'faltantes') return needsCorrection(c) && !notices.some((event) => event.type === 'llamado');
+        if (type === 'citacion') return needsCorrection(c) && notices.at(-1)?.type === 'llamado';
+        return true;
+      });
+      return options.length ? [[id, { label: group.label, actions: Object.fromEntries(options) }]] : [];
+    }));
+  }
   function totals(c) {
     const cents = (amount) => Math.round(Number(amount || 0) * 100);
     const paid = c.events.filter((e) => e.type === 'pago').reduce((sum, e) => sum + cents(e.amount), 0);
@@ -154,18 +197,13 @@
     switch (state) {
       case 'Archivada': return '';
       case 'Conciliada': return 'Archivar el expediente';
-      case 'Pagada': return last(c, 'identificacion') ? 'Conciliar el pago' : 'Identificar el detalle del pago';
+      case 'Pagada': return 'Conciliar el pago';
       case 'Cobrada':
-      case 'Pago parcial': return last(c, 'cobro') ? 'Dar seguimiento al pago pendiente' : 'Solicitar el pago a la entidad';
+      case 'Pago parcial': return collection(c) ? 'Dar seguimiento al pago pendiente' : 'Solicitar el pago a la entidad';
       case 'Transcrita': return 'Registrar la respuesta de la EPS / ARL';
-      case 'Rechazada': {
-        const corrected = c.events.indexOf(last(c, 'subsanacion')) > c.events.indexOf(last(c, 'rechazo'));
-        return corrected ? 'Registrar la nueva radicación' : 'Subsanar el rechazo de la entidad';
-      }
-      case 'Por completar': {
-        const notified = c.events.indexOf(last(c, 'faltantes')) > c.events.indexOf(intake(c).verification);
-        return notified ? 'Recibir correcciones y volver a verificar' : 'Solicitar correcciones o soportes faltantes';
-      }
+      case 'Rechazada': return 'Corregir el rechazo y registrar la nueva radicación';
+      case 'Por completar':
+        return correctionNotices(c).length ? 'Recibir correcciones y volver a verificar' : 'Solicitar correcciones o soportes faltantes';
       default: return 'Transcribir y radicar ante la EPS / ARL';
     }
   }
@@ -183,23 +221,23 @@
     const push = (label, due, kind) => out.push({ label, due, kind });
     const filing = deadline(c);
     if (!last(c, 'radicado')) push(filing ? 'Plazo de radicación' : 'Confirmar plazo con entidad', filing, 'Radicación');
-    if (!last(c, 'entrega')) push('Remitir soportes al líder o a Personal', add(c.issued, 2), 'Recepción');
+    if (!last(c, 'entrega') && !last(c, 'fisico')) push('Remitir soportes al líder o a Personal', add(c.issued, 2), 'Recepción');
     const step = requiredStep(c);
     if (step) push(actions[step][0], '', 'Recepción y documentos');
     if (!step && needsCorrection(c)) {
-      const notice = last(c, 'faltantes');
-      if (!notice || c.events.indexOf(notice) < c.events.indexOf(intake(c).verification)) push('Solicitar correcciones o soportes faltantes', c.received, 'Documentación');
-      else if (!last(c, 'llamado')) push('Segundo llamado por faltantes', businessDays(notice.date, 3, holidays), 'Documentación');
-      else if (!last(c, 'citacion')) push('Revisar citación con Coordinación', '', 'Documentación');
+      const notices = correctionNotices(c);
+      const firstNotice = notices.find((event) => event.type === 'faltantes');
+      if (!firstNotice) push('Solicitar correcciones o soportes faltantes', c.received, 'Documentación');
+      else if (!notices.some((event) => event.type === 'llamado')) push('Segundo llamado por faltantes', businessDays(firstNotice.date, 3, holidays), 'Documentación');
+      else if (!notices.some((event) => event.type === 'citacion')) push('Revisar citación con Coordinación', '', 'Documentación');
     }
     const state = status(c);
-    if (['Transcrita', 'Cobrada', 'Pago parcial', 'Rechazada'].includes(state)) {
-      push('Verificación diaria en la entidad', last(c, 'revision') ? add(last(c, 'revision').date, 1) : last(c, 'radicado')?.date, 'Cobro');
-      const collect = last(c, 'cobro');
-      push(collect ? 'Seguimiento semanal de cobro' : 'Solicitar pago a la entidad', collect ? add(last(c, 'seguimiento')?.date || collect.date, 7) : last(c, 'aceptacion')?.date, 'Cobro');
-    }
-    if (['Cobrada', 'Pago parcial'].includes(state)) {
-      const promise = last(c, 'acuerdo')?.due || last(c, 'aceptacion')?.due;
+    if (state === 'Transcrita') push('Respuesta de EPS / ARL pendiente', '', 'Radicación');
+    if (paymentPending(state)) {
+      const followup = collection(c);
+      push(followup ? 'Seguimiento semanal de cobro' : 'Solicitar pago a la entidad',
+        followup ? add(followup.date, 7) : last(c, 'aceptacion').date, 'Cobro');
+      const promise = paymentPromise(c);
       if (promise) push('Fecha prometida de pago', promise, 'Cobro');
       push('Límite de pago según procedimiento', months(last(c, 'aceptacion').date, 36), 'Cobro');
     }
@@ -219,6 +257,26 @@
     if (Array.isArray(event.fileIds)) return event.fileIds;
     return event.fileId ? [event.fileId] : [];
   }
+  function prepareEvent(c, input, holidays = []) {
+    const { type, response, ...fields } = input;
+    const step = requiredStep(c);
+    if (step && type !== step) throw Error('La siguiente gestión obligatoria es: ' + actions[step][0] + '.');
+    if (!Object.hasOwn(registerable, type)) throw Error('Elige una de las gestiones disponibles.');
+    let recordType = type;
+    if (type === 'respuesta') {
+      if (!['aceptacion', 'rechazo'].includes(response)) throw Error('Selecciona si la entidad aceptó o rechazó la radicación.');
+      if (status(c) !== 'Transcrita') throw Error('Registra una radicación pendiente de respuesta.');
+      recordType = response;
+    }
+    if (type === 'faltantes' && correctionNotices(c).some((event) => event.type === 'faltantes')) recordType = 'llamado';
+    if (type === 'cobro' && collection(c)) recordType = 'seguimiento';
+    const event = { ...fields, type: recordType };
+    const error = validateEvent(c, event, holidays);
+    if (error) throw Error(error);
+    const available = Object.values(availableActionGroups(c)).some((group) => Object.hasOwn(group.actions, type));
+    if (!available) throw Error('Esta gestión no está disponible en la etapa actual del expediente.');
+    return event;
+  }
   function validateEvent(c, e, holidays = []) {
     const previous = (type) => c.events.some((item) => item.type === type && item.date <= e.date);
     if (last(c, 'archivo')) return 'El expediente ya está archivado.';
@@ -237,16 +295,25 @@
     const available = new Set(c.files.map((file) => file.id));
     if (linkedFileIds(e).some((id) => !available.has(id))) return 'Selecciona soportes de este expediente.';
     if (e.type === 'faltantes' && !needsCorrection(c)) return 'La documentación ya está completa y aprobada.';
-    if (e.type === 'llamado' && (!previous('faltantes') || !needsCorrection(c) || e.date < businessDays(last(c, 'faltantes').date, 3, holidays))) return 'El segundo llamado requiere correcciones pendientes y que se cumplan los tres días hábiles.';
-    if (e.type === 'citacion' && !previous('llamado')) return 'Registra primero el segundo llamado.';
-    if (e.type === 'radicado' && status(c) === 'Rechazada' && !(last(c, 'subsanacion')?.date >= last(c, 'rechazo').date)) return 'Registra primero la subsanación del rechazo.';
-    if (['aceptacion', 'revision', 'rechazo', 'nomina', 'cobro'].includes(e.type) && !previous('radicado')) return 'Registra primero la radicación.';
-    if (e.type === 'seguimiento' && !previous('cobro')) return 'Registra primero la solicitud de pago.';
+    if (e.type === 'llamado') {
+      const notices = correctionNotices(c);
+      const first = notices.find((event) => event.type === 'faltantes');
+      if (!first || !needsCorrection(c) || e.date < businessDays(first.date, 3, holidays)) return 'El segundo llamado requiere correcciones pendientes y que se cumplan los tres días hábiles.';
+      if (notices.some((event) => event.type === 'llamado')) return 'Ya se registró el segundo llamado por estas correcciones.';
+    }
+    if (e.type === 'citacion' && !correctionNotices(c).some((event) => event.type === 'llamado' && event.date <= e.date)) return 'Registra primero el segundo llamado.';
+    if (e.type === 'radicado' && status(c) === 'Rechazada') {
+      if (last(c, 'rechazo').date > e.date) return 'La nueva radicación debe ser igual o posterior al rechazo.';
+      if (!e.correction?.trim() || !e.filingNumber?.trim()) return 'Indica la corrección realizada y el número del nuevo radicado.';
+    }
+    if (['aceptacion', 'rechazo'].includes(e.type) && !(last(c, 'radicado')?.date <= e.date)) return 'Registra primero la radicación.';
+    if (['cobro', 'seguimiento'].includes(e.type) && (!paymentPending(status(c)) || !(last(c, 'aceptacion')?.date <= e.date))) return 'Registra la aceptación de la entidad y verifica que haya un saldo pendiente.';
+    if (e.type === 'seguimiento' && collection(c)?.date > e.date) return 'La fecha de seguimiento debe ser igual o posterior a la última gestión de cobro.';
     if (['aceptacion', 'pago', 'reintegro'].includes(e.type) && !(Number(e.amount) > 0 && Number.isFinite(Number(e.amount)))) return 'Ingresa un valor positivo en COP.';
     if (['aceptacion', 'acuerdo'].includes(e.type) && (!e.due || e.due < e.date)) return 'Registra una fecha prometida válida.';
     if (e.type === 'pago' && !previous('aceptacion')) return 'Registra primero la aceptación de la entidad.';
     if (e.type === 'pago' && (!(Number(e.paidDays) > 0) || !Number.isInteger(Number(e.paidDays)))) return 'Indica los días pagados.';
-    if (e.type === 'conciliacion' && (!previous('pago') || !previous('identificacion'))) return 'Identifica el detalle y registra el pago antes de conciliar.';
+    if (e.type === 'conciliacion' && !previous('pago')) return 'Registra el pago antes de conciliar.';
     if (e.type === 'cartera') {
       const requests = c.events.filter((item) => item.type === 'persuasivo' && item.date <= e.date).sort((a, b) => a.date.localeCompare(b.date));
       if (requests.length < 2) return 'Registra al menos dos requerimientos persuasivos.';
@@ -254,7 +321,7 @@
     }
     if (e.type === 'agotamiento' && !previous('cartera')) return 'Registra el traslado a Cartera.';
     if (e.type === 'juridica') {
-      const promised = last(c, 'acuerdo')?.due || last(c, 'aceptacion')?.due;
+      const promised = paymentPromise(c);
       const denial = status(c) === 'Rechazada' && e.exception;
       const brokenPromise = totals(c).due > 0 && promised && e.date > promised;
       if (!previous('agotamiento') && !denial && !brokenPromise) return 'Registra el agotamiento de Cartera, documenta el rechazo improcedente o verifica que haya vencido la promesa de pago.';
@@ -265,6 +332,6 @@
     if (e.type === 'archivo' && (!previous('conciliacion') || status(c) !== 'Conciliada' || !e.exception)) return 'Concilia el pago total y confirma la destrucción del soporte clínico físico.';
     return '';
   }
-  const api = { types, entities, docs, actionGroups, actions, today, add, months, span, businessDays, days, deadline, channel, required, missing, requiredStep, pendingTask, totals, status, estimate, alerts, linkedFileIds, validateEvent };
+  const api = { types, entities, receiptChannels, docs, actionGroups, actions, availableActionGroups, today, add, months, span, businessDays, days, deadline, channel, required, missing, requiredStep, pendingTask, totals, status, estimate, alerts, linkedFileIds, prepareEvent, validateEvent };
   if (typeof module !== 'undefined') module.exports = api; else root.Nexo = api;
 })(globalThis);

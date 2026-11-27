@@ -113,12 +113,14 @@ const handlers = {
     if (!result.canceled) await fs.writeFile(result.filePath, open(await fs.readFile(filePath(file.id)), key), { mode: 0o600 });
     return !result.canceled;
   },
-  async event(id, event) {
+  async event(id, input) {
     const next = structuredClone(data);
     const c = find(id, next);
-    if (!validDate(event.date) || (event.due && !validDate(event.due)) || !requiredText(event.note)) throw Error('Revisa la fecha y la descripción.');
-    const error = rules.validateEvent(c, event, data.holidays);
-    if (error) throw Error(error);
+    if (!validDate(input.date) || (input.due && !validDate(input.due)) || !requiredText(input.note)) throw Error('Revisa la fecha y la descripción.');
+    if (input.sentDate && (!validDate(input.sentDate) || input.sentDate < c.issued || input.sentDate > input.date)) throw Error('La fecha de envío debe estar entre la emisión y la recepción física.');
+    if (input.submissionChannel && !rules.receiptChannels.includes(input.submissionChannel)) throw Error('Selecciona un canal de envío válido.');
+    if ([input.correction, input.filingNumber].some((value) => value && !requiredText(value))) throw Error('Revisa la corrección y el número de radicado.');
+    const event = rules.prepareEvent(c, input, data.holidays);
     const record = { ...event, fileIds: [...new Set(rules.linkedFileIds(event))], id: crypto.randomUUID(), at: new Date().toISOString() };
     delete record.fileId;
     c.events.push(record);
